@@ -1,13 +1,21 @@
-import { createChart, type CandlestickData, type IChartApi, type ISeriesApi } from "lightweight-charts";
+import { createChart, type CandlestickData, type IChartApi, type ISeriesApi, type LineData } from "lightweight-charts";
 import { useEffect, useRef } from "react";
+import { computeMA } from "../lib/ma";
 import type { DailyBar } from "../types";
 
 const RESET_EVENT = "twstock:reset-chart-range";
+
+const MA_LINES = [
+  { period: 5, label: "週線 (5)", color: "#ffd23f" },
+  { period: 20, label: "月線 (20)", color: "#c9a6ff" },
+  { period: 60, label: "季線 (60)", color: "#f4f6fb" },
+] as const;
 
 export function CandlestickChart({ bars }: { bars: DailyBar[] }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const maSeriesRef = useRef<ISeriesApi<"Line">[]>([]);
 
   // 建立一次圖表 + 監聽「重設所有圖表時間區間」事件，資料更新不會重建圖表，
   // 使用者手動縮放/拖曳的視窗範圍才不會每次背景刷新就被打回原狀。
@@ -34,6 +42,16 @@ export function CandlestickChart({ bars }: { bars: DailyBar[] }) {
       wickDownColor: "#2be3ae",
     });
 
+    maSeriesRef.current = MA_LINES.map((ma) =>
+      chart.addLineSeries({
+        color: ma.color,
+        lineWidth: 1,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+      })
+    );
+
     function resetRange() {
       chart.timeScale().fitContent();
     }
@@ -50,6 +68,7 @@ export function CandlestickChart({ bars }: { bars: DailyBar[] }) {
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
+      maSeriesRef.current = [];
     };
   }, []);
 
@@ -64,6 +83,12 @@ export function CandlestickChart({ bars }: { bars: DailyBar[] }) {
     }));
     const hadNoData = seriesRef.current.data().length === 0;
     seriesRef.current.setData(data);
+
+    MA_LINES.forEach((ma, i) => {
+      const maData: LineData[] = computeMA(bars, ma.period).map((p) => ({ time: p.time, value: p.value }));
+      maSeriesRef.current[i]?.setData(maData);
+    });
+
     if (hadNoData) chartRef.current?.timeScale().fitContent();
   }, [bars]);
 
@@ -71,5 +96,17 @@ export function CandlestickChart({ bars }: { bars: DailyBar[] }) {
     return <div className="empty-hint">尚無日 K 資料</div>;
   }
 
-  return <div ref={containerRef} />;
+  return (
+    <div>
+      <div className="ma-legend">
+        {MA_LINES.map((ma) => (
+          <span key={ma.period}>
+            <i style={{ background: ma.color }} />
+            {ma.label}
+          </span>
+        ))}
+      </div>
+      <div ref={containerRef} />
+    </div>
+  );
 }
