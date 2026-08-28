@@ -46,6 +46,7 @@ export function OrdersTable({
   return (
     <div className="panel">
       <h2>{title}</h2>
+      <div className="table-scroll">
       <table>
         <thead>
           <tr>
@@ -83,6 +84,7 @@ export function OrdersTable({
           })}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }

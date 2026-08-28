@@ -13,6 +13,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
   return (
     <div className="panel">
       <h2>成交紀錄</h2>
+      <div className="table-scroll">
       <table>
         <thead>
           <tr>
@@ -41,6 +42,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }

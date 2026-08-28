@@ -18,15 +18,15 @@ export function KDChart({ bars }: { bars: DailyBar[] }) {
     const chart = createChart(container, {
       width: container.clientWidth,
       height: 110,
-      layout: { background: { color: "transparent" }, textColor: "#6b7280", fontSize: 11 },
-      grid: { vertLines: { color: "#eef0f3" }, horzLines: { color: "#eef0f3" } },
-      rightPriceScale: { borderColor: "#e2e4e9" },
-      timeScale: { borderColor: "#e2e4e9" },
+      layout: { background: { color: "transparent" }, textColor: "#7688a8", fontSize: 11 },
+      grid: { vertLines: { color: "rgba(255,255,255,0.04)" }, horzLines: { color: "rgba(255,255,255,0.04)" } },
+      rightPriceScale: { borderColor: "#202a42" },
+      timeScale: { borderColor: "#202a42" },
     });
     chartRef.current = chart;
 
-    kSeriesRef.current = chart.addLineSeries({ color: "#f59e0b", lineWidth: 2, title: "K" });
-    dSeriesRef.current = chart.addLineSeries({ color: "#8b5cf6", lineWidth: 2, title: "D" });
+    kSeriesRef.current = chart.addLineSeries({ color: "#ffb454", lineWidth: 2, title: "K" });
+    dSeriesRef.current = chart.addLineSeries({ color: "#9b6bff", lineWidth: 2, title: "D" });
 
     function resetRange() {
       chart.timeScale().fitContent();

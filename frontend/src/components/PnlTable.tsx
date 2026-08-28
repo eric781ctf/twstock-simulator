@@ -13,6 +13,7 @@ export function PnlTable({ positions }: { positions: Position[] }) {
   return (
     <div className="panel">
       <h2>損益</h2>
+      <div className="table-scroll">
       <table>
         <thead>
           <tr>
@@ -49,6 +50,7 @@ export function PnlTable({ positions }: { positions: Position[] }) {
           })}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }

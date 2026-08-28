@@ -42,11 +42,11 @@ export function LineTrendChart({ points }: { points: PricePoint[] }) {
     const chart = createChart(container, {
       width: container.clientWidth,
       height: 220,
-      layout: { background: { color: "transparent" }, textColor: "#6b7280", fontSize: 11 },
-      grid: { vertLines: { color: "#eef0f3" }, horzLines: { color: "#eef0f3" } },
-      rightPriceScale: { borderColor: "#e2e4e9" },
+      layout: { background: { color: "transparent" }, textColor: "#7688a8", fontSize: 11 },
+      grid: { vertLines: { color: "rgba(255,255,255,0.04)" }, horzLines: { color: "rgba(255,255,255,0.04)" } },
+      rightPriceScale: { borderColor: "#202a42" },
       timeScale: {
-        borderColor: "#e2e4e9",
+        borderColor: "#202a42",
         timeVisible: true,
         secondsVisible: false,
         tickMarkFormatter: (time: Time) => formatTaipeiTime(time),
@@ -57,7 +57,12 @@ export function LineTrendChart({ points }: { points: PricePoint[] }) {
     });
     chartRef.current = chart;
 
-    seriesRef.current = chart.addLineSeries({ color: "#2563eb", lineWidth: 2 });
+    seriesRef.current = chart.addLineSeries({
+      color: "#4fd8ff",
+      lineWidth: 2,
+      lastValueVisible: true,
+      priceLineColor: "#4fd8ff",
+    });
 
     function resetRange() {
       chart.timeScale().fitContent();

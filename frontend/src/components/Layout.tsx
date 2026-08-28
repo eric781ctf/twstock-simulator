@@ -1,9 +1,10 @@
-import { NavLink, Navigate, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 
 export function Layout() {
   const { isAuthenticated, username, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
@@ -36,7 +37,9 @@ export function Layout() {
           <button onClick={handleLogout}>登出</button>
         </div>
       </nav>
-      <Outlet />
+      <div key={location.pathname} className="page-transition">
+        <Outlet />
+      </div>
     </>
   );
 }
