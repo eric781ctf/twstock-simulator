@@ -1,0 +1,132 @@
+"""台股報價與股票清單串接。
+
+注意：mis.twse.com.tw 是非官方但廣泛使用的即時報價端點，有 3 requests / 5 秒的速率限制，
+因此所有需要報價的股票代碼一律合併成單一請求（用 `|` 分隔），不逐檔呼叫。
+"""
+
+import logging
+import time
+
+import httpx
+
+from app.services.history import roc_compact_to_date, to_float, to_int
+
+logger = logging.getLogger(__name__)
+
+MIS_QUOTE_URL = "https://mis.twse.com.tw/stock/api/getStockInfo.jsp"
+TWSE_LISTED_URL = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
+TPEX_LISTED_URL = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes"
+
+_HEADERS = {"User-Agent": "Mozilla/5.0 (twstock-simulator)"}
+
+
+def _market_prefix(market: str) -> str:
+    return "tse_" if market == "TWSE" else "otc_"
+
+
+async def fetch_quotes(codes_with_market: list[tuple[str, str]]) -> dict[str, dict]:
+    """回傳 {code: {"price": float|None, "prev_close": float|None, "name": str}}。"""
+    if not codes_with_market:
+        return {}
+
+    ex_ch = "|".join(f"{_market_prefix(m)}{code}.tw" for code, m in codes_with_market)
+    # `_` 是給這個端點常見的快取破壞參數：ex_ch 對同一批股票每次輪詢都完全一樣，
+    # 若網址不變，中間的快取層（CDN 或 mis.twse 自己的伺服器端快取）可能一直回同一份
+    # 舊回應，導致盤中走勢圖出現「連續好幾小時同一個價格」的假象。
+    params = {"ex_ch": ex_ch, "json": "1", "delay": "0", "_": str(int(time.time() * 1000))}
+
+    try:
+        async with httpx.AsyncClient(timeout=10, headers=_HEADERS) as client:
+            resp = await client.get(MIS_QUOTE_URL, params=params)
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception:
+        logger.exception("fetch_quotes failed for codes=%s", [c for c, _ in codes_with_market])
+        return {}
+
+    result: dict[str, dict] = {}
+    for row in data.get("msgArray", []):
+        code = row.get("c")
+        if not code:
+            continue
+        price = _parse_float(row.get("z"))
+        prev_close = _parse_float(row.get("y"))
+        result[code] = {
+            "price": price if price is not None else prev_close,
+            "prev_close": prev_close,
+            "name": row.get("n"),
+        }
+    return result
+
+
+def _parse_float(raw) -> float | None:
+    if raw is None or raw == "-" or raw == "":
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+async def fetch_listed_stocks() -> list[dict]:
+    """上市股票清單（來自 TWSE OpenAPI）。"""
+    try:
+        async with httpx.AsyncClient(timeout=15, headers=_HEADERS) as client:
+            resp = await client.get(TWSE_LISTED_URL)
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception:
+        logger.exception("fetch_listed_stocks failed")
+        return []
+
+    stocks = []
+    for row in data:
+        code = row.get("Code") or row.get("代號")
+        name = row.get("Name") or row.get("名稱")
+        if code and name:
+            stocks.append(
+                {
+                    "code": code,
+                    "name": name,
+                    "market": "TWSE",
+                    "trade_date": roc_compact_to_date(row.get("Date")),
+                    "open": to_float(row.get("OpeningPrice")),
+                    "high": to_float(row.get("HighestPrice")),
+                    "low": to_float(row.get("LowestPrice")),
+                    "close": to_float(row.get("ClosingPrice")),
+                    "volume": to_int(row.get("TradeVolume")),
+                }
+            )
+    return stocks
+
+
+async def fetch_otc_stocks() -> list[dict]:
+    """上櫃股票清單（來自 TPEx OpenAPI）。"""
+    try:
+        async with httpx.AsyncClient(timeout=15, headers=_HEADERS) as client:
+            resp = await client.get(TPEX_LISTED_URL)
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception:
+        logger.exception("fetch_otc_stocks failed")
+        return []
+
+    stocks = []
+    for row in data:
+        code = row.get("Code") or row.get("代號") or row.get("SecuritiesCompanyCode")
+        name = row.get("Name") or row.get("名稱") or row.get("CompanyName")
+        if code and name:
+            stocks.append(
+                {
+                    "code": code,
+                    "name": name,
+                    "market": "TPEX",
+                    "trade_date": roc_compact_to_date(row.get("Date")),
+                    "open": to_float(row.get("Open")),
+                    "high": to_float(row.get("High")),
+                    "low": to_float(row.get("Low")),
+                    "close": to_float(row.get("Close")),
+                    "volume": to_int(row.get("TradingShares")),
+                }
+            )
+    return stocks
