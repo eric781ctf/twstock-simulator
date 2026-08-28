@@ -18,10 +18,14 @@ export function WatchlistChartBlock({ item, onRemove }: Props) {
     });
   }
 
+  function goToDetail() {
+    navigate(`/search?code=${item.stock_code}`);
+  }
+
   return (
     <div className="stock-block">
       <div className="stock-block-header">
-        <span className="title">
+        <span className="title clickable" onClick={goToDetail}>
           {item.stock_code} {item.stock_name}
         </span>
         <span className="price">{item.current_price != null ? item.current_price.toFixed(2) : "-"}</span>

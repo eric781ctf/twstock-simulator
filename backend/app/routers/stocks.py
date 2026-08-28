@@ -35,5 +35,8 @@ async def get_quote(code: str, db: Session = Depends(get_db)):
         name=stock.name,
         price=quote["price"],
         prev_close=quote["prev_close"],
+        open=quote.get("open"),
+        high=quote.get("high"),
+        low=quote.get("low"),
         is_stale=quote["price"] is None,
     )

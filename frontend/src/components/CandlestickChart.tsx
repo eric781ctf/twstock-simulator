@@ -6,12 +6,12 @@ import type { DailyBar } from "../types";
 const RESET_EVENT = "twstock:reset-chart-range";
 
 const MA_LINES = [
-  { period: 5, label: "週線 (5)", color: "#ffd23f" },
-  { period: 20, label: "月線 (20)", color: "#c9a6ff" },
-  { period: 60, label: "季線 (60)", color: "#f4f6fb" },
+  { period: 5, label: "週線 (5)", color: "#ffd23f", width: 1 },
+  { period: 20, label: "月線 (20)", color: "#4fc3ff", width: 1 },
+  { period: 60, label: "季線 (60)", color: "#f4f6fb", width: 2 },
 ] as const;
 
-export function CandlestickChart({ bars }: { bars: DailyBar[] }) {
+export function CandlestickChart({ bars, height = 220 }: { bars: DailyBar[]; height?: number }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -25,7 +25,7 @@ export function CandlestickChart({ bars }: { bars: DailyBar[] }) {
 
     const chart = createChart(container, {
       width: container.clientWidth,
-      height: 220,
+      height,
       layout: { background: { color: "transparent" }, textColor: "#7688a8", fontSize: 11 },
       grid: { vertLines: { color: "rgba(255,255,255,0.04)" }, horzLines: { color: "rgba(255,255,255,0.04)" } },
       rightPriceScale: { borderColor: "#202a42" },
@@ -45,7 +45,7 @@ export function CandlestickChart({ bars }: { bars: DailyBar[] }) {
     maSeriesRef.current = MA_LINES.map((ma) =>
       chart.addLineSeries({
         color: ma.color,
-        lineWidth: 1,
+        lineWidth: ma.width,
         priceLineVisible: false,
         lastValueVisible: false,
         crosshairMarkerVisible: false,

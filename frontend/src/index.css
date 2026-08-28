@@ -541,6 +541,15 @@ tbody tr:hover {
   font-size: 15px;
 }
 
+.stock-block-header .title.clickable {
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.stock-block-header .title.clickable:hover {
+  color: var(--accent);
+}
+
 .stock-block-header .price {
   font-family: var(--font-mono);
   font-size: 18px;
@@ -639,6 +648,70 @@ tbody tr:hover {
 .date-filter-form .reset-range-btn {
   width: auto;
   white-space: nowrap;
+}
+
+.external-link {
+  display: inline-block;
+  margin-top: 8px;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.external-link:hover {
+  text-decoration: underline;
+}
+
+.search-detail-block {
+  max-width: none;
+}
+
+.today-ohlc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 32px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 14px;
+}
+
+.today-ohlc > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.today-ohlc .label,
+.fundamentals-grid .label {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.today-ohlc .value,
+.fundamentals-grid .value {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.fundamentals-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  gap: 16px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+.fundamentals-grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .ma-legend {

@@ -28,6 +28,9 @@ export function Layout() {
           <NavLink to="/trade" className={({ isActive }) => (isActive ? "active" : "")}>
             交易
           </NavLink>
+          <NavLink to="/search" className={({ isActive }) => (isActive ? "active" : "")}>
+            搜尋
+          </NavLink>
           <NavLink to="/history" className={({ isActive }) => (isActive ? "active" : "")}>
             交易紀錄
           </NavLink>

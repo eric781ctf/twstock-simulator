@@ -16,6 +16,8 @@ logger = logging.getLogger(__name__)
 MIS_QUOTE_URL = "https://mis.twse.com.tw/stock/api/getStockInfo.jsp"
 TWSE_LISTED_URL = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
 TPEX_LISTED_URL = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes"
+TWSE_VALUATION_URL = "https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_ALL"
+TPEX_VALUATION_URL = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_peratio_analysis"
 
 _HEADERS = {"User-Agent": "Mozilla/5.0 (twstock-simulator)"}
 
@@ -25,7 +27,9 @@ def _market_prefix(market: str) -> str:
 
 
 async def fetch_quotes(codes_with_market: list[tuple[str, str]]) -> dict[str, dict]:
-    """回傳 {code: {"price": float|None, "prev_close": float|None, "name": str}}。"""
+    """回傳 {code: {"price", "prev_close", "name", "open", "high", "low"}}。
+    open/high/low 是「今天」的數字，就算這檔股票從沒被追蹤過、完全沒有分時歷史，
+    第一次查詢也能立刻知道今天開高低的大致輪廓，只是看不到走過的路徑形狀。"""
     if not codes_with_market:
         return {}
 
@@ -54,6 +58,9 @@ async def fetch_quotes(codes_with_market: list[tuple[str, str]]) -> dict[str, di
         result[code] = {
             "price": price if price is not None else prev_close,
             "prev_close": prev_close,
+            "open": _parse_float(row.get("o")),
+            "high": _parse_float(row.get("h")),
+            "low": _parse_float(row.get("l")),
             "name": row.get("n"),
         }
     return result
@@ -129,4 +136,49 @@ async def fetch_otc_stocks() -> list[dict]:
                     "volume": to_int(row.get("TradingShares")),
                 }
             )
+    return stocks
+
+
+async def fetch_valuations() -> list[dict]:
+    """全市場個股本益比、殖利率、股價淨值比（TWSE + TPEx），給搜尋頁的基本面區塊用。"""
+    stocks: list[dict] = []
+
+    try:
+        async with httpx.AsyncClient(timeout=20, headers=_HEADERS) as client:
+            resp = await client.get(TWSE_VALUATION_URL)
+            resp.raise_for_status()
+            for row in resp.json():
+                code = row.get("Code")
+                if not code:
+                    continue
+                stocks.append(
+                    {
+                        "code": code,
+                        "pe_ratio": to_float(row.get("PEratio")),
+                        "dividend_yield": to_float(row.get("DividendYield")),
+                        "pb_ratio": to_float(row.get("PBratio")),
+                    }
+                )
+    except Exception:
+        logger.exception("fetch_valuations (TWSE) failed")
+
+    try:
+        async with httpx.AsyncClient(timeout=20, headers=_HEADERS) as client:
+            resp = await client.get(TPEX_VALUATION_URL)
+            resp.raise_for_status()
+            for row in resp.json():
+                code = row.get("SecuritiesCompanyCode")
+                if not code:
+                    continue
+                stocks.append(
+                    {
+                        "code": code,
+                        "pe_ratio": to_float(row.get("PriceEarningRatio")),
+                        "dividend_yield": to_float(row.get("YieldRatio")),
+                        "pb_ratio": to_float(row.get("PriceBookRatio")),
+                    }
+                )
+    except Exception:
+        logger.exception("fetch_valuations (TPEx) failed")
+
     return stocks
