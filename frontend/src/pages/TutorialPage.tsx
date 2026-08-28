@@ -15,7 +15,7 @@ export default function TutorialPage() {
 
   return (
     <div className="tutorial">
-      <h2 className="section-title">技術教學</h2>
+      <h2 className="section-title">股市教學</h2>
 
       <div className="tutorial-tabs">
         {TABS.map((t) => (
