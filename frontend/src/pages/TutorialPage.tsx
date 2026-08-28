@@ -4,8 +4,14 @@ import { KDCrossDiagram } from "../components/KDCrossDiagram";
 
 const TABS = [
   { key: "candlestick", label: "認識 K 線" },
+  { key: "ma", label: "均線" },
+  { key: "volume", label: "量價關係" },
   { key: "kd", label: "KD 指標" },
   { key: "fundamentals", label: "基本面怎麼看" },
+  { key: "dividend", label: "除權息" },
+  { key: "oddlot", label: "零股交易規則" },
+  { key: "fees", label: "手續費與交易稅" },
+  { key: "orders", label: "委託／成交回報" },
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
@@ -61,6 +67,65 @@ export default function TutorialPage() {
               <b>下影線</b>：實體下方的細線，代表這段時間曾經跌到的最低價。下影線越長，代表下方買盤越強、有人在低點承接。
             </li>
           </ul>
+        </section>
+      )}
+
+      {tab === "ma" && (
+        <section className="panel tutorial-card">
+          <h3 className="tutorial-heading">均線（移動平均線）</h3>
+          <p>
+            均線是把最近 N 天的收盤價取平均、連成一條線，用來把短期價格波動「磨平」，比較容易看出股價目前的<b>趨勢方向</b>。
+          </p>
+
+          <h4 className="tutorial-subheading">常見的均線天數</h4>
+          <ul className="tutorial-list">
+            <li><b>5 日線</b>（週線）：短期趨勢與短線持有者的平均成本。</li>
+            <li><b>20 日線</b>（月線）：中期趨勢，常被當作短中期的支撐 / 壓力參考。</li>
+            <li><b>60 日線</b>（季線）：中長期趨勢，也常被當作法人 / 中長線買盤的平均成本。</li>
+            <li>更長天期還有半年線（120 日）、年線（240 日），用來看更長期的趨勢。</li>
+          </ul>
+
+          <div className="tutorial-grid">
+            <div>
+              <h4 className="tutorial-subheading buy-text">多頭排列</h4>
+              <p>股價 &gt; 5 日線 &gt; 20 日線 &gt; 60 日線，且各條均線都朝上，代表多頭趨勢明確。</p>
+            </div>
+            <div>
+              <h4 className="tutorial-subheading sell-text">空頭排列</h4>
+              <p>順序完全相反、股價落在所有均線下方，且均線都朝下，代表空頭趨勢明確。</p>
+            </div>
+          </div>
+
+          <h4 className="tutorial-subheading">均線糾結</h4>
+          <p>
+            當短、中、長天期均線纏繞在一起、糾結成一團時，代表多空力道相當、方向不明確，常常是變盤的前兆。糾結之後如果帶量突破，值得特別留意後續走勢。
+          </p>
+
+          <p className="tutorial-note">
+            均線也常被當作「動態的支撐 / 壓力」：股價拉回接近均線容易出現買盤支撐，反彈到均線附近則容易遇到賣壓，但均線是落後指標（用過去的價格算出來的），不會預測未來，只能輔助判斷。
+          </p>
+        </section>
+      )}
+
+      {tab === "volume" && (
+        <section className="panel tutorial-card">
+          <h3 className="tutorial-heading">量價關係</h3>
+          <p>
+            成交量代表市場對這檔股票的參與熱度與資金認同度。常聽到的「量比價先行」，意思是成交量的變化，常常比股價本身更早反映出買賣力道的轉變。
+          </p>
+
+          <h4 className="tutorial-subheading">常見的量價判斷</h4>
+          <ul className="tutorial-list">
+            <li><b>價漲量增</b>：上漲有成交量支撐，追價意願強，趨勢通常比較健康、有力。</li>
+            <li><b>價漲量縮</b>：股價上漲但量能萎縮，代表追高意願不足，漲勢可能後繼無力。</li>
+            <li><b>價跌量增</b>：下跌且成交量放大，代表賣壓沉重，甚至出現恐慌性賣壓。</li>
+            <li><b>價跌量縮</b>：下跌但量能萎縮，代表賣壓有限，股價可能接近止跌。</li>
+          </ul>
+
+          <h4 className="tutorial-subheading">爆量要特別注意</h4>
+          <p>
+            成交量明顯放大（例如是近期均量的好幾倍）時，通常代表有重要籌碼正在轉手，可能是趨勢轉折的訊號。但同樣的「爆量」出現在低檔和高檔，意義可能完全相反：低檔爆量常是「換手上攻」的起漲訊號，高檔爆量卻可能是主力「倒貨出場」的訊號，一定要搭配股價當時所在的相對位置一起判斷。
+          </p>
         </section>
       )}
 
@@ -214,6 +279,124 @@ export default function TutorialPage() {
 
           <p className="tutorial-note">
             把「這家公司賺多少錢（獲利能力）」+「現在股價貴不貴（評價指標）」+「生意是變好還變差（營運趨勢）」+「體質穩不穩（財務結構）」+「產業與經營團隊好不好（質化因素）」這幾塊資訊放在一起交叉比對，才是完整的基本面分析。
+          </p>
+        </section>
+      )}
+
+      {tab === "dividend" && (
+        <section className="panel tutorial-card">
+          <h3 className="tutorial-heading">除權息是什麼？</h3>
+          <p>
+            公司賺錢之後，常常會把一部分獲利以股利的形式發還給股東。發放<b>現金股利</b>叫做「除息」，發放<b>股票股利</b>叫做「除權」，兩者都有的話就統稱「除權息」。
+          </p>
+
+          <h4 className="tutorial-subheading">為什麼股價會在除權息當天往下跳？</h4>
+          <p>
+            因為股利是從公司口袋掏出來發給股東的，公司帳上的淨值因此減少，股價要相應往下修正，才能反映公司價值的減少——這是制度上的正常調整，並不是股價無緣無故下跌。
+          </p>
+          <code className="tutorial-formula">除息參考價 ≈ 除息前一日收盤價 − 每股現金股利</code>
+          <p style={{ marginTop: 10 }}>
+            （除權的計算方式是依股票股利的比例去調整，公式較複雜，這裡先不展開；實務上很多公司是現金股利、股票股利一起發，會用更完整的公式一次算出參考價。）
+          </p>
+
+          <h4 className="tutorial-subheading">填權息 / 貼權息</h4>
+          <ul className="tutorial-list">
+            <li><b>填權 / 填息</b>：除權息之後，股價又漲回到除權息前的價位，代表市場願意用原本的價位認同這家公司。</li>
+            <li><b>貼權 / 貼息</b>：除權息之後股價一直沒有漲回去，代表拿到的股利可能被股價的下跌抵銷掉了。</li>
+          </ul>
+
+          <p className="tutorial-note">
+            這跟「基本面」提到的殖利率是同一件事的兩面：殖利率＝現金股利 ÷ 股價，是<b>發放前</b>的預期報酬率；除權息則是股利<b>實際發放</b>、股價相應調整的那個動作。領到股利不代表穩賺，如果之後貼息，等於是「左手換右手」。
+          </p>
+        </section>
+      )}
+
+      {tab === "oddlot" && (
+        <section className="panel tutorial-card">
+          <h3 className="tutorial-heading">零股交易規則</h3>
+          <p>
+            台股一張是 1,000 股，買賣不足一張（1～999 股）就叫做<b>零股</b>。本站模擬的正是零股交易，方便小資族用比較少的資金分批布局，或是分散投資高價股。
+          </p>
+
+          <h4 className="tutorial-subheading">交易時段</h4>
+          <ul className="tutorial-list">
+            <li>
+              <b>盤中零股（09:00～13:30）</b>：跟整股同時段交易，採逐筆撮合（價格優先、時間優先），本站的撮合邏輯就是模擬這個時段。
+            </li>
+            <li>
+              <b>盤後零股（13:40～14:30）</b>：用當天收盤價「定價交易」下單，不能自己喊價，14:30 過後才會一次撮合，本站沒有實作這個時段。
+            </li>
+          </ul>
+
+          <h4 className="tutorial-subheading">零股價格跟整股一樣嗎？</h4>
+          <p>
+            零股跟整股是同一檔股票、同一套價格系統，理論上零股成交價會很接近同時段的整股成交價。但因為零股的買賣參與者相對少、流動性較低，實際成交價偶爾會跟整股有落差，尤其是冷門股或股價很高的股票（例如一張要好幾百萬的股票，整股買氣淡、零股反而更熱絡）。
+          </p>
+
+          <p className="tutorial-note">
+            本站的撮合方式：後端會定時輪詢即時報價，只要報價「觸及」你掛單的限價，就視為成交，不保證一定買得到／賣得掉，也不會用整股的委託簿深度去精算——是簡化過的模擬，重點放在讓你熟悉零股下單、部位管理的流程。
+          </p>
+        </section>
+      )}
+
+      {tab === "fees" && (
+        <section className="panel tutorial-card">
+          <h3 className="tutorial-heading">手續費與交易稅怎麼算？</h3>
+          <p>本站每一筆成交都會自動算好手續費、交易稅，直接反映在「成交回報」和「交易紀錄」的欄位裡。原理其實很單純：</p>
+
+          <div className="tutorial-grid">
+            <div>
+              <h4 className="tutorial-subheading">手續費</h4>
+              <p>買進、賣出<b>都要付</b>，費率上限是成交金額的 <b>0.1425%</b>（實務上券商常打折，例如打 6 折）。</p>
+            </div>
+            <div>
+              <h4 className="tutorial-subheading">交易稅</h4>
+              <p>只有<b>賣出</b>的時候要付，現股交易稅是成交金額的 <b>0.3%</b>。</p>
+            </div>
+          </div>
+
+          <h4 className="tutorial-subheading">實際算一次給你看</h4>
+          <p>假設用 100 元買進 10 股，之後用 105 元賣出這 10 股：</p>
+          <ul className="tutorial-list">
+            <li>買進金額 = 100 × 10 = 1,000 元，手續費 = 1,000 × 0.1425% ≈ <b>1 元</b></li>
+            <li>賣出金額 = 105 × 10 = 1,050 元，手續費 ≈ <b>1 元</b>，交易稅 = 1,050 × 0.3% ≈ <b>3 元</b></li>
+            <li>價差獲利 = (105 − 100) × 10 = 50 元，扣掉手續費 2 元、交易稅 3 元，實際淨賺 <b>45 元</b></li>
+          </ul>
+
+          <p className="tutorial-note">
+            本站採用標準費率（0.1425%）、不打折、也沒有設最低手續費門檻，賣出另計 0.3% 交易稅。真實券商很多會有「零股最低手續費」（例如每筆最低 1 元）的規定，跟本站的計算方式可能會有些微差異，實際下單前還是要以你使用的券商公告為準。
+          </p>
+        </section>
+      )}
+
+      {tab === "orders" && (
+        <section className="panel tutorial-card">
+          <h3 className="tutorial-heading">委託回報／成交回報是什麼？</h3>
+          <p>
+            本站的下單只支援<b>限價單</b>：下單時要填「你願意成交的價格」跟股數，系統<b>不保證一定會成交</b>，要等實際報價觸及你的限價才會成交。「交易」頁把你的訂單依狀態分成兩個區塊：
+          </p>
+
+          <div className="tutorial-grid">
+            <div>
+              <h4 className="tutorial-subheading">委託回報</h4>
+              <p>
+                今天下的單裡<b>還沒成交</b>的部分，狀態顯示「待成交」。下單當下，買單會先凍結需要的資金、賣單會先凍結對應的庫存，但錢或股票都還沒真的動。
+              </p>
+            </div>
+            <div>
+              <h4 className="tutorial-subheading">成交回報</h4>
+              <p>今天下的單裡<b>已經成交</b>的部分，可以看到實際成交價、成交時間。訂單成交後會自動從委託回報移到成交回報。</p>
+            </div>
+          </div>
+
+          <h4 className="tutorial-subheading">委託單的生命週期</h4>
+          <ul className="tutorial-list">
+            <li><b>當日有效</b>：收盤（13:30）還沒成交的話，會自動失效，凍結的資金／庫存也會跟著解凍。</li>
+            <li><b>可以手動取消</b>：成交前隨時可以在委託回報按「取消」，提前解凍資金／庫存。</li>
+          </ul>
+
+          <p className="tutorial-note">
+            為什麼掛單不一定會成交：因為是限價單，如果市場價格一直沒有觸及你設定的限價，訂單就會一直停在委託回報，等到收盤才失效——這是刻意模擬真實市場「限價單不保證成交」的特性，而不是系統故障。
           </p>
         </section>
       )}
