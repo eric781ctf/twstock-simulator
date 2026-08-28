@@ -60,7 +60,7 @@ export function AddWatchlistBox({ disabled, onAdded }: Props) {
             <div className="search-results">
               {results.map((s) => (
                 <div key={s.code} onClick={() => !submitting && handleAdd(s)}>
-                  {s.code} {s.name} <span style={{ color: "#9ca3af" }}>({s.market})</span>
+                  {s.code} {s.name} <span style={{ color: "var(--muted)" }}>({s.market})</span>
                 </div>
               ))}
             </div>

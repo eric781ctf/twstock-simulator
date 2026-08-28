@@ -102,7 +102,7 @@ export function OrderPanel({ onOrderPlaced, prefill }: Props) {
         <div className="search-results">
           {results.map((s) => (
             <div key={s.code} onClick={() => selectStock(s)}>
-              {s.code} {s.name} <span style={{ color: "#9ca3af" }}>({s.market})</span>
+              {s.code} {s.name} <span style={{ color: "var(--muted)" }}>({s.market})</span>
             </div>
           ))}
         </div>

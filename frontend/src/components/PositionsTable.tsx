@@ -13,6 +13,7 @@ export function PositionsTable({ positions }: { positions: Position[] }) {
   return (
     <div className="panel">
       <h2>持有部位</h2>
+      <div className="table-scroll">
       <table>
         <thead>
           <tr>
@@ -41,6 +42,7 @@ export function PositionsTable({ positions }: { positions: Position[] }) {
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }

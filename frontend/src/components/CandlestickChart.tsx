@@ -18,20 +18,20 @@ export function CandlestickChart({ bars }: { bars: DailyBar[] }) {
     const chart = createChart(container, {
       width: container.clientWidth,
       height: 220,
-      layout: { background: { color: "transparent" }, textColor: "#6b7280", fontSize: 11 },
-      grid: { vertLines: { color: "#eef0f3" }, horzLines: { color: "#eef0f3" } },
-      rightPriceScale: { borderColor: "#e2e4e9" },
-      timeScale: { borderColor: "#e2e4e9" },
+      layout: { background: { color: "transparent" }, textColor: "#7688a8", fontSize: 11 },
+      grid: { vertLines: { color: "rgba(255,255,255,0.04)" }, horzLines: { color: "rgba(255,255,255,0.04)" } },
+      rightPriceScale: { borderColor: "#202a42" },
+      timeScale: { borderColor: "#202a42" },
     });
     chartRef.current = chart;
 
     seriesRef.current = chart.addCandlestickSeries({
-      upColor: "#d64545",
-      downColor: "#1a9c5a",
-      borderUpColor: "#d64545",
-      borderDownColor: "#1a9c5a",
-      wickUpColor: "#d64545",
-      wickDownColor: "#1a9c5a",
+      upColor: "#ff4f7e",
+      downColor: "#2be3ae",
+      borderUpColor: "#ff4f7e",
+      borderDownColor: "#2be3ae",
+      wickUpColor: "#ff4f7e",
+      wickDownColor: "#2be3ae",
     });
 
     function resetRange() {
