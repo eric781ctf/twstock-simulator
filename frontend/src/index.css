@@ -653,6 +653,42 @@ tbody tr:hover {
 }
 
 /* ---- 技術教學頁 ---- */
+.tutorial-tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0 0 16px;
+}
+
+.tutorial-tabs button {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--muted);
+  border-radius: 10px;
+  padding: 9px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--font-ui);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tutorial-tabs button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.tutorial-tabs button.active {
+  background: var(--accent-gradient);
+  color: #05070d;
+  border-color: transparent;
+  box-shadow: var(--glow-accent);
+}
+
+.tutorial-tabs + .tutorial-card {
+  animation: tab-enter 0.25s ease;
+}
+
 .tutorial-card {
   padding: 22px 24px;
 }
