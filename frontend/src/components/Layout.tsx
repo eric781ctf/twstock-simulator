@@ -31,6 +31,9 @@ export function Layout() {
           <NavLink to="/history" className={({ isActive }) => (isActive ? "active" : "")}>
             交易紀錄
           </NavLink>
+          <NavLink to="/tutorial" className={({ isActive }) => (isActive ? "active" : "")}>
+            技術教學
+          </NavLink>
         </div>
         <div className="nav-user">
           <span>{username}</span>

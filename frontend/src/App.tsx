@@ -6,6 +6,7 @@ import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
 import TradeHistoryPage from "./pages/TradeHistoryPage";
 import TradePage from "./pages/TradePage";
+import TutorialPage from "./pages/TutorialPage";
 
 export default function App() {
   return (
@@ -18,6 +19,7 @@ export default function App() {
             <Route path="/" element={<HomePage />} />
             <Route path="/trade" element={<TradePage />} />
             <Route path="/history" element={<TradeHistoryPage />} />
+            <Route path="/tutorial" element={<TutorialPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

@@ -652,6 +652,232 @@ tbody tr:hover {
   letter-spacing: 0.04em;
 }
 
+/* ---- 技術教學頁 ---- */
+.tutorial-card {
+  padding: 22px 24px;
+}
+
+.tutorial-heading {
+  font-size: 18px;
+  margin: 0 0 14px;
+  background: var(--accent-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+}
+
+.tutorial-subheading {
+  font-size: 14px;
+  margin: 18px 0 8px;
+  color: var(--accent);
+}
+
+.tutorial-card p {
+  line-height: 1.75;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.tutorial-list {
+  margin: 0 0 12px;
+  padding-left: 20px;
+  line-height: 1.75;
+  font-size: 14px;
+}
+
+.tutorial-list li {
+  margin-bottom: 8px;
+}
+
+.tutorial-list li::marker {
+  color: var(--accent);
+}
+
+.tutorial-formula {
+  display: block;
+  margin-top: 6px;
+  padding: 8px 12px;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--accent);
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.tutorial-note {
+  margin-top: 14px;
+  padding: 12px 16px;
+  background: rgba(79, 216, 255, 0.06);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 8px 8px 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+
+.tutorial-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 16px;
+  margin: 16px 0;
+}
+
+.tutorial-grid h4 {
+  margin-top: 0;
+}
+
+.tutorial-grid p {
+  margin: 0;
+  font-size: 13px;
+}
+
+.diagram-wrap {
+  display: flex;
+  justify-content: center;
+  margin: 18px 0;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.candle-diagram, .kd-diagram {
+  width: 100%;
+  max-width: 420px;
+  height: auto;
+  overflow: visible;
+}
+
+.candle-label {
+  font-size: 12px;
+  font-weight: 700;
+  fill: var(--text);
+}
+
+.candle-label-buy {
+  fill: var(--buy);
+}
+
+.candle-label-sell {
+  fill: var(--sell);
+}
+
+.candle-wick {
+  stroke-width: 2;
+}
+
+.candle-wick-buy {
+  stroke: var(--buy);
+}
+
+.candle-wick-sell {
+  stroke: var(--sell);
+}
+
+.candle-body-buy {
+  fill: var(--buy);
+  stroke: var(--buy);
+  stroke-width: 2;
+}
+
+.candle-body-sell {
+  fill: var(--sell);
+  stroke: var(--sell);
+  stroke-width: 2;
+}
+
+.candle-note {
+  font-size: 10px;
+  fill: var(--muted);
+}
+
+.candle-leader {
+  stroke: var(--border-strong);
+  stroke-width: 1;
+}
+
+.candle-footnote {
+  font-size: 10px;
+  fill: var(--muted);
+}
+
+.kd-zone {
+  fill: rgba(255, 255, 255, 0.03);
+}
+
+.kd-zone-overbought {
+  fill: rgba(255, 79, 126, 0.06);
+}
+
+.kd-zone-oversold {
+  fill: rgba(43, 227, 174, 0.06);
+}
+
+.kd-zone-label {
+  font-size: 9px;
+  fill: var(--muted);
+}
+
+.kd-line {
+  fill: none;
+  stroke-width: 2;
+}
+
+.kd-line-k {
+  stroke: #ffb454;
+}
+
+.kd-line-d {
+  stroke: #9b6bff;
+}
+
+.kd-cross-dot {
+  stroke: var(--bg);
+  stroke-width: 2;
+}
+
+.kd-cross-golden {
+  fill: var(--buy);
+}
+
+.kd-cross-death {
+  fill: var(--sell);
+}
+
+.kd-cross-leader {
+  stroke: var(--border-strong);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.kd-cross-label {
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.kd-cross-label-golden {
+  fill: var(--buy);
+}
+
+.kd-cross-label-death {
+  fill: var(--sell);
+}
+
+.compare-table th, .compare-table td {
+  text-align: left;
+  font-family: var(--font-ui);
+  font-size: 13px;
+}
+
+.compare-table th:first-child, .compare-table td:first-child {
+  color: var(--muted);
+  font-weight: 600;
+}
+
 /* 頁面切換動畫：路由變更時淡入 + 輕微上移，營造未來感的畫面過場 */
 @keyframes page-enter {
   from {
