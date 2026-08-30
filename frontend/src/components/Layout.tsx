@@ -33,6 +33,11 @@ export function Layout() {
     navigate("/login");
   }
 
+  function handleLeaderboard() {
+    setMenuOpen(false);
+    navigate("/leaderboard");
+  }
+
   return (
     <>
       <header className="app-header">
@@ -55,9 +60,6 @@ export function Layout() {
           <NavLink to="/positions" className={({ isActive }) => (isActive ? "active" : "")}>
             部位
           </NavLink>
-          <NavLink to="/leaderboard" className={({ isActive }) => (isActive ? "active" : "")}>
-            排行榜
-          </NavLink>
           <NavLink to="/tutorial" className={({ isActive }) => (isActive ? "active" : "")}>
             股市教學
           </NavLink>
@@ -69,7 +71,8 @@ export function Layout() {
           </button>
           {menuOpen && (
             <div className="nav-user-menu">
-              <button onClick={handleLogout}>登出</button>
+              <button onClick={handleLeaderboard}>排行榜</button>
+              <button className="danger" onClick={handleLogout}>登出</button>
             </div>
           )}
         </div>

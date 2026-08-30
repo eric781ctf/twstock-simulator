@@ -508,6 +508,10 @@ tbody tr:hover {
 
 .nav-user-menu button:hover {
   background: var(--panel-hover);
+  color: var(--accent);
+}
+
+.nav-user-menu button.danger:hover {
   color: var(--sell);
 }
 
