@@ -81,6 +81,14 @@ export interface AuthResponse {
   access_token: string;
   token_type: string;
   username: string;
+  nickname: string;
+}
+
+export interface LeaderboardEntry {
+  nickname: string;
+  total_assets: number;
+  cash_balance: number;
+  market_value: number;
 }
 
 export type MarketSessionStatus = "trading" | "after_hours" | "closed";

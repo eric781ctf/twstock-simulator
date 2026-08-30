@@ -6,6 +6,7 @@ export default function RegisterPage() {
   const { register } = useAuth();
   const navigate = useNavigate();
   const [username, setUsername] = useState("");
+  const [nickname, setNickname] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -18,6 +19,10 @@ export default function RegisterPage() {
       setError("帳號至少需要 3 個字元");
       return;
     }
+    if (!nickname.trim()) {
+      setError("請填寫暱稱");
+      return;
+    }
     if (password.length < 6) {
       setError("密碼至少需要 6 個字元");
       return;
@@ -25,7 +30,7 @@ export default function RegisterPage() {
 
     setSubmitting(true);
     try {
-      await register(username, password);
+      await register(username, password, nickname.trim());
       navigate("/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "註冊失敗");
@@ -40,6 +45,7 @@ export default function RegisterPage() {
         <h1>台股零股模擬交易</h1>
         <p className="auth-subtitle">建立新帳戶，起始資金 1,000,000 元</p>
         <input placeholder="帳號 (至少 3 字元)" value={username} onChange={(e) => setUsername(e.target.value)} autoFocus />
+        <input placeholder="暱稱 (顯示於排行榜)" value={nickname} onChange={(e) => setNickname(e.target.value)} />
         <input
           type="password"
           placeholder="密碼 (至少 6 字元)"
