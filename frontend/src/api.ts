@@ -5,6 +5,7 @@ import type {
   Fundamentals,
   FundamentalsHistoryPoint,
   LeaderboardEntry,
+  MarketSession,
   Order,
   OrderSide,
   OrderStatus,
@@ -91,4 +92,6 @@ export const api = {
     request<void>(`/watchlist/${stock_code}`, { method: "DELETE" }),
 
   getLeaderboard: () => request<LeaderboardEntry[]>("/leaderboard"),
+
+  getMarketSession: () => request<MarketSession>("/market/session"),
 };

@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     poll_interval_seconds: int = 7
     trading_start: str = "09:00"
     trading_end: str = "13:30"
+    after_hours_end: str = "20:00"
     commission_rate: float = 0.001425
     tax_rate: float = 0.003
     cors_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]

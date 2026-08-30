@@ -91,6 +91,15 @@ export interface LeaderboardEntry {
   market_value: number;
 }
 
+export type MarketSessionStatus = "trading" | "after_hours" | "closed";
+
+export interface MarketSession {
+  status: MarketSessionStatus;
+  trading_start: string;
+  trading_end: string;
+  after_hours_end: string;
+}
+
 export interface DailyBar {
   trade_date: string;
   open: number;

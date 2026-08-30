@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -84,6 +85,13 @@ class WatchlistItemOut(BaseModel):
 
 class WatchlistCreate(BaseModel):
     stock_code: str
+
+
+class MarketSessionOut(BaseModel):
+    status: Literal["trading", "after_hours", "closed"]
+    trading_start: str
+    trading_end: str
+    after_hours_end: str
 
 
 class LeaderboardEntryOut(BaseModel):

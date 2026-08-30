@@ -277,6 +277,92 @@ button.submit:disabled {
   margin-bottom: 10px;
 }
 
+.order-hint {
+  color: var(--muted);
+  font-size: 12px;
+  margin: -6px 0 10px;
+}
+
+.order-hint.warn {
+  color: var(--buy);
+}
+
+.market-session-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 20px;
+  border-radius: 999px;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  margin-bottom: 16px;
+  border: 1.5px solid var(--border);
+  background: var(--panel);
+  color: var(--muted);
+  transition: all 0.2s ease;
+}
+
+.market-session-dot {
+  position: relative;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.market-session-badge.trading {
+  color: var(--sell);
+  border-color: var(--sell);
+  background: rgba(43, 227, 174, 0.14);
+  box-shadow: var(--glow-sell);
+}
+
+.market-session-badge.trading .market-session-dot::after {
+  content: "";
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.55;
+  animation: session-ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+.market-session-badge.after_hours {
+  color: var(--accent-2);
+  border-color: var(--accent-2);
+  background: rgba(155, 107, 255, 0.16);
+  box-shadow: 0 0 18px rgba(155, 107, 255, 0.4);
+}
+
+.market-session-badge.after_hours .market-session-dot::after {
+  content: "";
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.4;
+  animation: session-ping 2.4s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+.market-session-badge.closed {
+  color: var(--muted);
+  background: var(--panel);
+}
+
+@keyframes session-ping {
+  0% {
+    transform: scale(1);
+    opacity: 0.5;
+  }
+  75%,
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+
 .table-scroll {
   overflow-x: auto;
 }

@@ -21,6 +21,7 @@ def _parse_hhmm(value: str) -> time:
 
 TRADING_START = _parse_hhmm(settings.trading_start)
 TRADING_END = _parse_hhmm(settings.trading_end)
+AFTER_HOURS_END = _parse_hhmm(settings.after_hours_end)
 
 
 def is_trading_hours(now: datetime | None = None) -> bool:
@@ -28,6 +29,15 @@ def is_trading_hours(now: datetime | None = None) -> bool:
     if now.weekday() >= 5:  # 週六、週日
         return False
     return TRADING_START <= now.time() <= TRADING_END
+
+
+def is_after_hours_window(now: datetime | None = None) -> bool:
+    """模擬盤後定價交易：收盤後到 AFTER_HOURS_END 這段時間都能用「收盤價」買進或賣出，
+    只在平日（週一到五）才有效——週末股市本來就沒開盤，不算盤後。"""
+    now = now or datetime.now(TAIPEI_TZ)
+    if now.weekday() >= 5:  # 週六、週日沒有開盤，也就沒有盤後
+        return False
+    return TRADING_END < now.time() <= AFTER_HOURS_END
 
 
 def create_account_for_user(db: Session, user_id: int) -> Account:
@@ -62,7 +72,23 @@ class OrderValidationError(Exception):
     pass
 
 
-def create_order(db: Session, account: Account, stock: Stock, side: Side, price: float, quantity: int) -> Order:
+async def create_order(db: Session, account: Account, stock: Stock, side: Side, price: float, quantity: int) -> Order:
+    now = datetime.now(TAIPEI_TZ)
+    trading = is_trading_hours(now)
+    after_hours = not trading and is_after_hours_window(now)
+
+    if not trading and not after_hours:
+        raise OrderValidationError("目前非可下單時段（盤中或盤後至 24:00 前才能下單）")
+
+    if after_hours:
+        # 盤後只能用「收盤價」成交，不是使用者自訂的限價；此時 mis.twse 的報價已經停在
+        # 當天最後一筆成交價，等同收盤價，直接拿來當成交價使用並立刻成交。
+        quote = await fetch_quotes([(stock.code, stock.market.value)])
+        q = quote.get(stock.code)
+        if not q or q["price"] is None:
+            raise OrderValidationError("目前無法取得今日收盤價，請稍後再試")
+        price = q["price"]
+
     if side == Side.BUY:
         amount = compute_amount(price, quantity)
         estimated_fee = compute_commission(amount)
@@ -96,6 +122,11 @@ def create_order(db: Session, account: Account, stock: Stock, side: Side, price:
         )
 
     db.add(order)
+    db.flush()
+
+    if after_hours:
+        _fill_order(db, order, price)
+
     db.commit()
     db.refresh(order)
     return order

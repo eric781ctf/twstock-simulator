@@ -3,7 +3,13 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { OrderPanel, type OrderPrefill } from "../components/OrderPanel";
 import { OrdersTable } from "../components/OrdersTable";
-import type { Account, Order, Position } from "../types";
+import type { Account, MarketSession, Order, Position } from "../types";
+
+const SESSION_LABEL: Record<MarketSession["status"], string> = {
+  trading: "盤中交易",
+  after_hours: "盤後交易（以收盤價買進）",
+  closed: "非交易時間",
+};
 
 export default function TradePage() {
   const location = useLocation();
@@ -14,6 +20,7 @@ export default function TradePage() {
   const [positions, setPositions] = useState<Position[]>([]);
   const [pendingOrders, setPendingOrders] = useState<Order[]>([]);
   const [filledOrdersToday, setFilledOrdersToday] = useState<Order[]>([]);
+  const [marketSession, setMarketSession] = useState<MarketSession | null>(null);
 
   const refresh = useCallback(async () => {
     const [accountRes, positionsRes, pendingRes, filledRes] = await Promise.all([
@@ -34,6 +41,16 @@ export default function TradePage() {
     return () => clearInterval(timer);
   }, [refresh]);
 
+  useEffect(() => {
+    async function refreshSession() {
+      const session = await api.getMarketSession();
+      setMarketSession(session);
+    }
+    refreshSession();
+    const timer = setInterval(refreshSession, 30000);
+    return () => clearInterval(timer);
+  }, []);
+
   // 從自選股 block 帶著預設股票/方向跳轉過來後，清掉 navigation state，
   // 避免之後從導覽列重新進入交易頁時又被套用一次。
   useEffect(() => {
@@ -47,6 +64,12 @@ export default function TradePage() {
 
   return (
     <>
+      {marketSession && (
+        <div className={`market-session-badge ${marketSession.status}`}>
+          <span className="market-session-dot" />
+          {SESSION_LABEL[marketSession.status]}
+        </div>
+      )}
       {account && (
         <div className="account-bar">
           <div className="stat">
@@ -74,7 +97,7 @@ export default function TradePage() {
 
       <div className="layout">
         <div>
-          <OrderPanel onOrderPlaced={refresh} prefill={prefill} />
+          <OrderPanel onOrderPlaced={refresh} prefill={prefill} marketSession={marketSession} />
         </div>
         <div>
           <OrdersTable
