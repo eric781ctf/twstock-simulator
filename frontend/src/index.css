@@ -665,6 +665,37 @@ tbody tr:hover {
   max-width: none;
 }
 
+.watchlist-toggle-btn {
+  border: 1px solid var(--border);
+  background: var(--input-bg);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--font-ui);
+  cursor: pointer;
+  margin-bottom: 14px;
+  transition: all 0.2s ease;
+}
+
+.watchlist-toggle-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.watchlist-toggle-btn.active {
+  background: var(--accent-gradient);
+  color: #05070d;
+  border-color: transparent;
+  box-shadow: var(--glow-accent);
+}
+
+.watchlist-toggle-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .today-ohlc {
   display: flex;
   flex-wrap: wrap;

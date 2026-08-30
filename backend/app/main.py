@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -8,10 +9,21 @@ from app.config import settings
 from app.database import Base, SessionLocal, engine
 from app.routers import account, auth, market_data, orders, positions, stocks, trades, watchlist
 from app.services.scheduler import start_scheduler, stop_scheduler
-from app.services.stock_sync import sync_stocks, sync_valuations
+from app.services.stock_sync import backfill_valuation_history, sync_stocks, sync_valuations
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+async def _backfill_valuation_history_task() -> None:
+    """~36 次歷史快照回補要打不少外部 API，放到背景執行，不要卡住應用程式啟動。"""
+    db = SessionLocal()
+    try:
+        await backfill_valuation_history(db)
+    except Exception:
+        logger.exception("backfill_valuation_history 背景任務發生錯誤")
+    finally:
+        db.close()
 
 
 @asynccontextmanager
@@ -27,8 +39,10 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
 
+    backfill_task = asyncio.create_task(_backfill_valuation_history_task())
     start_scheduler()
     yield
+    backfill_task.cancel()
     stop_scheduler()
 
 

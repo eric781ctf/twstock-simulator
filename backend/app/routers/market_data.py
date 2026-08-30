@@ -1,11 +1,11 @@
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import PricePoint, Stock, StockValuation
+from app.models import PricePoint, Stock, StockValuationHistory
 from app.schemas import FundamentalsOut
 from app.services.history import get_daily_history
 from app.services.matching import TAIPEI_TZ
@@ -59,13 +59,25 @@ def intraday(code: str, db: Session = Depends(get_db)):
     return [PricePointOut(ts=p.ts.isoformat(), price=p.price) for p in points]
 
 
+class FundamentalsHistoryPointOut(BaseModel):
+    as_of_date: date
+    pe_ratio: float | None
+    dividend_yield: float | None
+    pb_ratio: float | None
+
+
 @router.get("/{code}/fundamentals", response_model=FundamentalsOut)
 def fundamentals(code: str, db: Session = Depends(get_db)):
     stock = db.get(Stock, code)
     if not stock:
         raise HTTPException(status_code=404, detail="股票代碼不存在")
 
-    v = db.get(StockValuation, code)
+    v = (
+        db.query(StockValuationHistory)
+        .filter(StockValuationHistory.stock_code == code)
+        .order_by(StockValuationHistory.as_of_date.desc())
+        .first()
+    )
     if not v:
         return FundamentalsOut(stock_code=code, pe_ratio=None, dividend_yield=None, pb_ratio=None, updated_at=None)
 
@@ -74,5 +86,26 @@ def fundamentals(code: str, db: Session = Depends(get_db)):
         pe_ratio=v.pe_ratio,
         dividend_yield=v.dividend_yield,
         pb_ratio=v.pb_ratio,
-        updated_at=v.updated_at,
+        updated_at=datetime.combine(v.as_of_date, time.min, tzinfo=TAIPEI_TZ),
     )
+
+
+@router.get("/{code}/fundamentals-history", response_model=list[FundamentalsHistoryPointOut])
+def fundamentals_history(code: str, years: int = 3, db: Session = Depends(get_db)):
+    stock = db.get(Stock, code)
+    if not stock:
+        raise HTTPException(status_code=404, detail="股票代碼不存在")
+
+    cutoff = date.today() - timedelta(days=years * 365)
+    rows = (
+        db.query(StockValuationHistory)
+        .filter(StockValuationHistory.stock_code == code, StockValuationHistory.as_of_date >= cutoff)
+        .order_by(StockValuationHistory.as_of_date.asc())
+        .all()
+    )
+    return [
+        FundamentalsHistoryPointOut(
+            as_of_date=r.as_of_date, pe_ratio=r.pe_ratio, dividend_yield=r.dividend_yield, pb_ratio=r.pb_ratio
+        )
+        for r in rows
+    ]

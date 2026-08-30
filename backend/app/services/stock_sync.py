@@ -1,11 +1,19 @@
 import logging
+from datetime import date, timedelta
 
 from sqlalchemy.orm import Session
 
-from app.models import DailyBar, Market, Stock, StockValuation
-from app.services.twse_client import fetch_listed_stocks, fetch_otc_stocks, fetch_valuations
+from app.models import DailyBar, Market, Stock, StockValuationHistory
+from app.services.twse_client import (
+    fetch_listed_stocks,
+    fetch_otc_stocks,
+    fetch_twse_valuations_for_date,
+    fetch_valuations,
+)
 
 logger = logging.getLogger(__name__)
+
+VALUATION_BACKFILL_MONTHS = 36
 
 
 async def sync_stocks(db: Session) -> int:
@@ -72,23 +80,19 @@ async def sync_stocks(db: Session) -> int:
     return count
 
 
-async def sync_valuations(db: Session) -> int:
-    """同步全市場本益比、殖利率、股價淨值比到 stock_valuations，供搜尋頁基本面區塊使用。
-    必須在 sync_stocks 之後呼叫，確保 stocks 表已經有對應的股票代碼（外鍵）。"""
-    items = await fetch_valuations()
+def _upsert_valuation_snapshot(db: Session, as_of: date, items: list[dict], known_codes: set[str]) -> int:
+    items = [item for item in items if item["code"] in known_codes]
     if not items:
-        logger.warning("sync_valuations: 外部 API 無回傳資料，略過本次同步")
         return 0
 
-    known_codes = {c for (c,) in db.query(Stock.code).all()}
-    items = [item for item in items if item["code"] in known_codes]
-
+    codes = [i["code"] for i in items]
     existing = {
         v.stock_code: v
-        for v in db.query(StockValuation).filter(StockValuation.stock_code.in_([i["code"] for i in items])).all()
+        for v in db.query(StockValuationHistory)
+        .filter(StockValuationHistory.as_of_date == as_of, StockValuationHistory.stock_code.in_(codes))
+        .all()
     }
 
-    count = 0
     for item in items:
         code = item["code"]
         if code in existing:
@@ -96,15 +100,66 @@ async def sync_valuations(db: Session) -> int:
             v.pe_ratio, v.dividend_yield, v.pb_ratio = item["pe_ratio"], item["dividend_yield"], item["pb_ratio"]
         else:
             db.add(
-                StockValuation(
+                StockValuationHistory(
                     stock_code=code,
+                    as_of_date=as_of,
                     pe_ratio=item["pe_ratio"],
                     dividend_yield=item["dividend_yield"],
                     pb_ratio=item["pb_ratio"],
                 )
             )
-        count += 1
+    return len(items)
 
+
+async def sync_valuations(db: Session) -> int:
+    """同步今天的本益比、殖利率、股價淨值比快照到 stock_valuation_history。
+    必須在 sync_stocks 之後呼叫，確保 stocks 表已經有對應的股票代碼（外鍵）。
+    TWSE 股票另外有 backfill_valuation_history 回補歷史，這裡主要是讓 TPEx
+    股票（沒有依日期查詢的公開端點）逐日累積出自己的歷史。"""
+    items = await fetch_valuations()
+    if not items:
+        logger.warning("sync_valuations: 外部 API 無回傳資料，略過本次同步")
+        return 0
+
+    known_codes = {c for (c,) in db.query(Stock.code).all()}
+    count = _upsert_valuation_snapshot(db, date.today(), items, known_codes)
     db.commit()
     logger.info("sync_valuations: 同步完成，共 %d 檔", count)
     return count
+
+
+async def backfill_valuation_history(db: Session, months: int = VALUATION_BACKFILL_MONTHS) -> int:
+    """回補 TWSE 上市股票過去約 N 個月的本益比／殖利率／股價淨值比月度快照
+    （用官方「依日期查詢」端點，一次查一天可以拿到全部上市股票，效率很高）。
+    TPEx 沒有這種依日期查詢的公開端點，回補不到，只能每日累積。
+
+    只在資料明顯不足時才執行（用「歷史最早日期是不是夠久遠」判斷），
+    避免每次容器重啟都重新打幾十次外部 API。
+    """
+    cutoff = date.today() - timedelta(days=months * 30)
+    earliest = db.query(StockValuationHistory.as_of_date).order_by(StockValuationHistory.as_of_date.asc()).first()
+    if earliest and earliest[0] <= cutoff + timedelta(days=45):
+        logger.info("backfill_valuation_history: 已有足夠歷史資料（最早 %s），略過回補", earliest[0])
+        return 0
+
+    known_codes = {c for (c,) in db.query(Stock.code).all()}
+    total = 0
+    today = date.today()
+
+    for i in range(months):
+        year = today.year
+        month = today.month - i
+        while month <= 0:
+            month += 12
+            year -= 1
+        query_date = f"{year}{month:02d}05"  # 每月 5 號附近，盡量避開週末
+
+        items = await fetch_twse_valuations_for_date(query_date)
+        if not items:
+            continue
+        count = _upsert_valuation_snapshot(db, date(year, month, 5), items, known_codes)
+        total += count
+
+    db.commit()
+    logger.info("backfill_valuation_history: 回補完成，共寫入 %d 筆快照", total)
+    return total
