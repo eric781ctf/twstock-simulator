@@ -7,7 +7,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import Base, SessionLocal, engine
-from app.routers import account, auth, market_data, orders, positions, stocks, trades, watchlist
+from app.routers import account, auth, leaderboard, market_data, orders, positions, stocks, trades, watchlist
+from app.services.migrations import run_lightweight_migrations
 from app.services.scheduler import start_scheduler, stop_scheduler
 from app.services.stock_sync import backfill_valuation_history, sync_stocks, sync_valuations
 
@@ -29,6 +30,7 @@ async def _backfill_valuation_history_task() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
+    run_lightweight_migrations(engine)
 
     db = SessionLocal()
     try:
@@ -64,6 +66,7 @@ app.include_router(orders.router)
 app.include_router(trades.router)
 app.include_router(market_data.router)
 app.include_router(watchlist.router)
+app.include_router(leaderboard.router)
 
 
 @app.get("/health")

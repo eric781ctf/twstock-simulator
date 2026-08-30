@@ -4,6 +4,7 @@ import type {
   DailyBar,
   Fundamentals,
   FundamentalsHistoryPoint,
+  LeaderboardEntry,
   Order,
   OrderSide,
   OrderStatus,
@@ -50,8 +51,8 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  register: (username: string, password: string) =>
-    request<AuthResponse>("/auth/register", { method: "POST", body: JSON.stringify({ username, password }) }),
+  register: (username: string, password: string, nickname: string) =>
+    request<AuthResponse>("/auth/register", { method: "POST", body: JSON.stringify({ username, password, nickname }) }),
   login: (username: string, password: string) =>
     request<AuthResponse>("/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }),
 
@@ -88,4 +89,6 @@ export const api = {
     request<WatchlistItem>("/watchlist", { method: "POST", body: JSON.stringify({ stock_code }) }),
   removeFromWatchlist: (stock_code: string) =>
     request<void>(`/watchlist/${stock_code}`, { method: "DELETE" }),
+
+  getLeaderboard: () => request<LeaderboardEntry[]>("/leaderboard"),
 };

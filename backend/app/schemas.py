@@ -86,6 +86,13 @@ class WatchlistCreate(BaseModel):
     stock_code: str
 
 
+class LeaderboardEntryOut(BaseModel):
+    nickname: str
+    total_assets: float
+    cash_balance: float
+    market_value: float
+
+
 class TradeOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
