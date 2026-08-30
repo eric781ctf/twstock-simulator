@@ -3,6 +3,7 @@ import { AuthProvider } from "./auth/AuthContext";
 import { Layout } from "./components/Layout";
 import HomePage from "./pages/HomePage";
 import LoginPage from "./pages/LoginPage";
+import PositionPage from "./pages/PositionPage";
 import RegisterPage from "./pages/RegisterPage";
 import SearchPage from "./pages/SearchPage";
 import TradeHistoryPage from "./pages/TradeHistoryPage";
@@ -21,6 +22,7 @@ export default function App() {
             <Route path="/trade" element={<TradePage />} />
             <Route path="/search" element={<SearchPage />} />
             <Route path="/history" element={<TradeHistoryPage />} />
+            <Route path="/positions" element={<PositionPage />} />
             <Route path="/tutorial" element={<TutorialPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
