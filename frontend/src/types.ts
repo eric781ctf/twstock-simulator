@@ -23,6 +23,13 @@ export interface Fundamentals {
   updated_at: string | null;
 }
 
+export interface FundamentalsHistoryPoint {
+  as_of_date: string;
+  pe_ratio: number | null;
+  dividend_yield: number | null;
+  pb_ratio: number | null;
+}
+
 export interface Account {
   id: number;
   name: string;

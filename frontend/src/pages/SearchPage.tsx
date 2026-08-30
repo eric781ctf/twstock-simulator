@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { ChartTabs } from "../components/ChartTabs";
 import { useStockCharts } from "../hooks/useStockCharts";
-import type { Fundamentals, Quote, Stock } from "../types";
+import type { Fundamentals, FundamentalsHistoryPoint, Quote, Stock, WatchlistItem } from "../types";
 
 export default function SearchPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -14,8 +14,40 @@ export default function SearchPage() {
   const [selected, setSelected] = useState<Stock | null>(null);
   const [quote, setQuote] = useState<Quote | null>(null);
   const [fundamentals, setFundamentals] = useState<Fundamentals | null>(null);
+  const [fundamentalsHistory, setFundamentalsHistory] = useState<FundamentalsHistoryPoint[]>([]);
+  const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
+  const [watchlistBusy, setWatchlistBusy] = useState(false);
+  const [watchlistError, setWatchlistError] = useState<string | null>(null);
 
   const { bars, points, loading } = useStockCharts(code);
+
+  const inWatchlist = watchlist.some((w) => w.stock_code === code);
+
+  async function refreshWatchlist() {
+    try {
+      setWatchlist(await api.getWatchlist());
+    } catch {
+      // 自選股清單載入失敗不影響頁面其他部分，靜默略過即可。
+    }
+  }
+
+  async function handleToggleWatchlist() {
+    if (!code) return;
+    setWatchlistBusy(true);
+    setWatchlistError(null);
+    try {
+      if (inWatchlist) {
+        await api.removeFromWatchlist(code);
+      } else {
+        await api.addToWatchlist(code);
+      }
+      await refreshWatchlist();
+    } catch (err) {
+      setWatchlistError(err instanceof Error ? err.message : "操作失敗");
+    } finally {
+      setWatchlistBusy(false);
+    }
+  }
 
   async function handleSearch(value: string) {
     setQuery(value);
@@ -36,12 +68,17 @@ export default function SearchPage() {
     setSearchParams({ code: stock.code });
   }
 
+  useEffect(() => {
+    refreshWatchlist();
+  }, []);
+
   // code 來自網址（例如從自選股點股票名稱跳轉過來），只要 code 一變就重新載入該股票的所有資料。
   useEffect(() => {
     if (!code) {
       setSelected(null);
       setQuote(null);
       setFundamentals(null);
+      setFundamentalsHistory([]);
       return;
     }
     let cancelled = false;
@@ -65,6 +102,12 @@ export default function SearchPage() {
         if (!cancelled) setFundamentals(f);
       } catch {
         if (!cancelled) setFundamentals(null);
+      }
+      try {
+        const h = await api.getFundamentalsHistory(code, 3);
+        if (!cancelled) setFundamentalsHistory(h);
+      } catch {
+        if (!cancelled) setFundamentalsHistory([]);
       }
     }
 
@@ -113,6 +156,18 @@ export default function SearchPage() {
           <div className="stock-block-meta">
             <span>{selected?.market ?? ""}</span>
           </div>
+
+          <button
+            className={`watchlist-toggle-btn ${inWatchlist ? "active" : ""}`}
+            onClick={handleToggleWatchlist}
+            disabled={watchlistBusy || (!inWatchlist && watchlist.length >= 20)}
+          >
+            {inWatchlist ? "★ 已加入自選股（點擊移除）" : "☆ 加入自選股"}
+          </button>
+          {!inWatchlist && watchlist.length >= 20 && (
+            <div className="error-msg">自選股清單已滿 20 檔，移除一些才能再新增</div>
+          )}
+          {watchlistError && <div className="error-msg">{watchlistError}</div>}
 
           <div className="today-ohlc">
             <div>
@@ -164,6 +219,36 @@ export default function SearchPage() {
             </div>
           ) : (
             <div className="empty-hint">暫無基本面資料</div>
+          )}
+
+          {fundamentalsHistory.length > 0 && (
+            <>
+              <h4 className="tutorial-subheading" style={{ marginTop: 16 }}>
+                歷史月度快照（近 3 年，共 {fundamentalsHistory.length} 筆）
+              </h4>
+              <div className="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>日期</th>
+                      <th>本益比</th>
+                      <th>殖利率</th>
+                      <th>股價淨值比</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...fundamentalsHistory].reverse().map((h) => (
+                      <tr key={h.as_of_date}>
+                        <td style={{ textAlign: "left" }}>{h.as_of_date}</td>
+                        <td>{h.pe_ratio != null ? h.pe_ratio.toFixed(2) : "-"}</td>
+                        <td>{h.dividend_yield != null ? `${h.dividend_yield.toFixed(2)}%` : "-"}</td>
+                        <td>{h.pb_ratio != null ? h.pb_ratio.toFixed(2) : "-"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </div>
       )}

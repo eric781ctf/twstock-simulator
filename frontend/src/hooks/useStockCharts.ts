@@ -10,6 +10,13 @@ export function useStockCharts(stockCode: string) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!stockCode) {
+      setBars([]);
+      setPoints([]);
+      setLoading(false);
+      return;
+    }
+
     let cancelled = false;
     let firstLoad = true;
     setLoading(true);

@@ -3,6 +3,7 @@ import type {
   AuthResponse,
   DailyBar,
   Fundamentals,
+  FundamentalsHistoryPoint,
   Order,
   OrderSide,
   OrderStatus,
@@ -61,6 +62,8 @@ export const api = {
     request<DailyBar[]>(`/stocks/${code}/daily-history?months=${months}`),
   getIntraday: (code: string) => request<PricePoint[]>(`/stocks/${code}/intraday`),
   getFundamentals: (code: string) => request<Fundamentals>(`/stocks/${code}/fundamentals`),
+  getFundamentalsHistory: (code: string, years = 3) =>
+    request<FundamentalsHistoryPoint[]>(`/stocks/${code}/fundamentals-history?years=${years}`),
   getPositions: () => request<Position[]>("/positions"),
   getOrders: (params?: { status?: OrderStatus; todayOnly?: boolean }) => {
     const q = new URLSearchParams();

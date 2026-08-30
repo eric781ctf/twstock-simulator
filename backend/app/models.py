@@ -146,17 +146,20 @@ class PricePoint(Base):
     price: Mapped[float] = mapped_column(Float, nullable=False)
 
 
-class StockValuation(Base):
-    """個股本益比、殖利率、股價淨值比。每日同步時從 TWSE/TPEx 官方 API 覆蓋更新，
-    供搜尋頁的基本面區塊顯示。"""
+class StockValuationHistory(Base):
+    """個股本益比、殖利率、股價淨值比的歷史快照。TWSE 股票會用官方的「依日期查詢」
+    端點一次回補約 3 年的月度快照；TPEx 沒有這種依日期查詢的公開端點，只能從系統
+    啟動後每日同步時逐日累積（跟 daily_bars 的 TPEx 處理方式一樣）。"""
 
-    __tablename__ = "stock_valuations"
+    __tablename__ = "stock_valuation_history"
+    __table_args__ = (UniqueConstraint("stock_code", "as_of_date", name="uq_valuation_history_stock_date"),)
 
-    stock_code: Mapped[str] = mapped_column(ForeignKey("stocks.code"), primary_key=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    stock_code: Mapped[str] = mapped_column(ForeignKey("stocks.code"), nullable=False)
+    as_of_date: Mapped[date] = mapped_column(Date, nullable=False)
     pe_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
     dividend_yield: Mapped[float | None] = mapped_column(Float, nullable=True)
     pb_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 class WatchlistItem(Base):

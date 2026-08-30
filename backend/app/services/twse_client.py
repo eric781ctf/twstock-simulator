@@ -18,6 +18,7 @@ TWSE_LISTED_URL = "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
 TPEX_LISTED_URL = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes"
 TWSE_VALUATION_URL = "https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_ALL"
 TPEX_VALUATION_URL = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_peratio_analysis"
+TWSE_VALUATION_HISTORY_URL = "https://www.twse.com.tw/exchangeReport/BWIBBU_d"
 
 _HEADERS = {"User-Agent": "Mozilla/5.0 (twstock-simulator)"}
 
@@ -182,3 +183,37 @@ async def fetch_valuations() -> list[dict]:
         logger.exception("fetch_valuations (TPEx) failed")
 
     return stocks
+
+
+async def fetch_twse_valuations_for_date(query_date: str) -> list[dict]:
+    """全市場（僅 TWSE 上市）在「某一天」的本益比、殖利率、股價淨值比快照，
+    用來一次回補過去幾年的月度歷史。query_date 格式 YYYYMMDD（西元年）。
+    TPEx 沒有公開的依日期查詢端點，回補不到，只能每日累積（見 stock_sync.py）。"""
+    try:
+        async with httpx.AsyncClient(timeout=20, headers=_HEADERS) as client:
+            resp = await client.get(
+                TWSE_VALUATION_HISTORY_URL,
+                params={"response": "json", "date": query_date, "selectType": "ALL"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception:
+        logger.exception("fetch_twse_valuations_for_date failed for %s", query_date)
+        return []
+
+    rows = data.get("data") or []
+    result = []
+    for row in rows:
+        # row: [證券代號, 證券名稱, 收盤價, 殖利率(%), 股利年度, 本益比, 股價淨值比, 財報年/季]
+        if len(row) < 7:
+            continue
+        code = row[0]
+        result.append(
+            {
+                "code": code,
+                "pe_ratio": to_float(row[5]),
+                "dividend_yield": to_float(row[3]),
+                "pb_ratio": to_float(row[6]),
+            }
+        )
+    return result
