@@ -2,7 +2,7 @@ from fastapi import APIRouter
 
 from app.config import settings
 from app.schemas import MarketSessionOut
-from app.services.matching import is_after_hours_buy_window, is_trading_hours
+from app.services.matching import is_after_hours_window, is_trading_hours
 
 router = APIRouter(prefix="/market", tags=["market"])
 
@@ -11,7 +11,7 @@ router = APIRouter(prefix="/market", tags=["market"])
 def get_market_session():
     if is_trading_hours():
         status = "trading"
-    elif is_after_hours_buy_window():
+    elif is_after_hours_window():
         status = "after_hours"
     else:
         status = "closed"

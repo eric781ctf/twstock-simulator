@@ -30,8 +30,8 @@ def is_trading_hours(now: datetime | None = None) -> bool:
     return TRADING_START <= now.time() <= TRADING_END
 
 
-def is_after_hours_buy_window(now: datetime | None = None) -> bool:
-    """模擬盤後定價交易：收盤到當天午夜都能用「收盤價」買進，只在平日（週一到五）
+def is_after_hours_window(now: datetime | None = None) -> bool:
+    """模擬盤後定價交易：收盤到當天午夜都能用「收盤價」買進或賣出，只在平日（週一到五）
     才有效——週末股市本來就沒開盤，不算盤後。`now.time()` 只比較一天內的時分秒，
     跨過午夜後 now 的日期會換下一天、time-of-day 歸零，天然就落在這個區間之外，
     不用另外判斷午夜邊界。"""
@@ -76,13 +76,13 @@ class OrderValidationError(Exception):
 async def create_order(db: Session, account: Account, stock: Stock, side: Side, price: float, quantity: int) -> Order:
     now = datetime.now(TAIPEI_TZ)
     trading = is_trading_hours(now)
-    after_hours_buy = side == Side.BUY and not trading and is_after_hours_buy_window(now)
+    after_hours = not trading and is_after_hours_window(now)
 
-    if side == Side.BUY and not trading and not after_hours_buy:
-        raise OrderValidationError("目前非可下單時段（盤中或盤後至 24:00 前才能買進）")
+    if not trading and not after_hours:
+        raise OrderValidationError("目前非可下單時段（盤中或盤後至 24:00 前才能下單）")
 
-    if after_hours_buy:
-        # 盤後只能用「收盤價」買，不是使用者自訂的限價；此時 mis.twse 的報價已經停在
+    if after_hours:
+        # 盤後只能用「收盤價」成交，不是使用者自訂的限價；此時 mis.twse 的報價已經停在
         # 當天最後一筆成交價，等同收盤價，直接拿來當成交價使用並立刻成交。
         quote = await fetch_quotes([(stock.code, stock.market.value)])
         q = quote.get(stock.code)
@@ -125,7 +125,7 @@ async def create_order(db: Session, account: Account, stock: Stock, side: Side, 
     db.add(order)
     db.flush()
 
-    if after_hours_buy:
+    if after_hours:
         _fill_order(db, order, price)
 
     db.commit()
