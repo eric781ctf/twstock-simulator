@@ -66,6 +66,7 @@ export default function TradePage() {
     <>
       {marketSession && (
         <div className={`market-session-badge ${marketSession.status}`}>
+          <span className="market-session-dot" />
           {SESSION_LABEL[marketSession.status]}
         </div>
       )}
