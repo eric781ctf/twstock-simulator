@@ -34,6 +34,9 @@ export function Layout() {
           <NavLink to="/history" className={({ isActive }) => (isActive ? "active" : "")}>
             交易紀錄
           </NavLink>
+          <NavLink to="/positions" className={({ isActive }) => (isActive ? "active" : "")}>
+            部位
+          </NavLink>
           <NavLink to="/tutorial" className={({ isActive }) => (isActive ? "active" : "")}>
             股市教學
           </NavLink>

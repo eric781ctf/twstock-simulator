@@ -3,11 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { OrderPanel, type OrderPrefill } from "../components/OrderPanel";
 import { OrdersTable } from "../components/OrdersTable";
-import { PnlTable } from "../components/PnlTable";
-import { PositionsTable } from "../components/PositionsTable";
 import type { Account, Order, Position } from "../types";
-
-type PositionTab = "positions" | "pnl";
 
 export default function TradePage() {
   const location = useLocation();
@@ -18,7 +14,6 @@ export default function TradePage() {
   const [positions, setPositions] = useState<Position[]>([]);
   const [pendingOrders, setPendingOrders] = useState<Order[]>([]);
   const [filledOrdersToday, setFilledOrdersToday] = useState<Order[]>([]);
-  const [positionTab, setPositionTab] = useState<PositionTab>("positions");
 
   const refresh = useCallback(async () => {
     const [accountRes, positionsRes, pendingRes, filledRes] = await Promise.all([
@@ -82,20 +77,6 @@ export default function TradePage() {
           <OrderPanel onOrderPlaced={refresh} prefill={prefill} />
         </div>
         <div>
-          <div className="chart-tabs">
-            <button className={positionTab === "positions" ? "active" : ""} onClick={() => setPositionTab("positions")}>
-              持有部位
-            </button>
-            <button className={positionTab === "pnl" ? "active" : ""} onClick={() => setPositionTab("pnl")}>
-              損益
-            </button>
-          </div>
-          {positionTab === "positions" ? (
-            <PositionsTable positions={positions} />
-          ) : (
-            <PnlTable positions={positions} />
-          )}
-
           <OrdersTable
             orders={pendingOrders}
             onChanged={refresh}
