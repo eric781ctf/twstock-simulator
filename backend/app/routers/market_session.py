@@ -15,4 +15,9 @@ def get_market_session():
         status = "after_hours"
     else:
         status = "closed"
-    return MarketSessionOut(status=status, trading_start=settings.trading_start, trading_end=settings.trading_end)
+    return MarketSessionOut(
+        status=status,
+        trading_start=settings.trading_start,
+        trading_end=settings.trading_end,
+        after_hours_end=settings.after_hours_end,
+    )

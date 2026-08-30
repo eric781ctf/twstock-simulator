@@ -21,6 +21,7 @@ def _parse_hhmm(value: str) -> time:
 
 TRADING_START = _parse_hhmm(settings.trading_start)
 TRADING_END = _parse_hhmm(settings.trading_end)
+AFTER_HOURS_END = _parse_hhmm(settings.after_hours_end)
 
 
 def is_trading_hours(now: datetime | None = None) -> bool:
@@ -31,14 +32,12 @@ def is_trading_hours(now: datetime | None = None) -> bool:
 
 
 def is_after_hours_window(now: datetime | None = None) -> bool:
-    """模擬盤後定價交易：收盤到當天午夜都能用「收盤價」買進或賣出，只在平日（週一到五）
-    才有效——週末股市本來就沒開盤，不算盤後。`now.time()` 只比較一天內的時分秒，
-    跨過午夜後 now 的日期會換下一天、time-of-day 歸零，天然就落在這個區間之外，
-    不用另外判斷午夜邊界。"""
+    """模擬盤後定價交易：收盤後到 AFTER_HOURS_END 這段時間都能用「收盤價」買進或賣出，
+    只在平日（週一到五）才有效——週末股市本來就沒開盤，不算盤後。"""
     now = now or datetime.now(TAIPEI_TZ)
     if now.weekday() >= 5:  # 週六、週日沒有開盤，也就沒有盤後
         return False
-    return now.time() > TRADING_END
+    return TRADING_END < now.time() <= AFTER_HOURS_END
 
 
 def create_account_for_user(db: Session, user_id: int) -> Account:

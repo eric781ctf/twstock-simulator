@@ -91,6 +91,7 @@ class MarketSessionOut(BaseModel):
     status: Literal["trading", "after_hours", "closed"]
     trading_start: str
     trading_end: str
+    after_hours_end: str
 
 
 class TradeOut(BaseModel):
