@@ -31,12 +31,11 @@ def is_trading_hours(now: datetime | None = None) -> bool:
 
 
 def is_after_hours_buy_window(now: datetime | None = None) -> bool:
-    """模擬盤後定價交易：收盤到當天午夜都能用「收盤價」買進。`now.time()` 只比較
-    一天內的時分秒，跨過午夜後 now 的日期會換下一天、time-of-day 歸零，
-    天然就落在這個區間之外，不用另外判斷午夜邊界。"""
+    """模擬盤後定價交易：收盤到當天午夜都能用「收盤價」買進。純看時分秒，週末也算——
+    報價來源在假日一樣會回上一個交易日的收盤價，模擬器沒有理由把週末排除在外。
+    `now.time()` 只比較一天內的時分秒，跨過午夜後 now 的日期會換下一天、
+    time-of-day 歸零，天然就落在這個區間之外，不用另外判斷午夜邊界。"""
     now = now or datetime.now(TAIPEI_TZ)
-    if now.weekday() >= 5:  # 週六、週日沒有開盤，也就沒有盤後
-        return False
     return now.time() > TRADING_END
 
 
