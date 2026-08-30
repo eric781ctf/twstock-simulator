@@ -4,6 +4,7 @@ import type {
   DailyBar,
   Fundamentals,
   FundamentalsHistoryPoint,
+  MarketSession,
   Order,
   OrderSide,
   OrderStatus,
@@ -88,4 +89,6 @@ export const api = {
     request<WatchlistItem>("/watchlist", { method: "POST", body: JSON.stringify({ stock_code }) }),
   removeFromWatchlist: (stock_code: string) =>
     request<void>(`/watchlist/${stock_code}`, { method: "DELETE" }),
+
+  getMarketSession: () => request<MarketSession>("/market/session"),
 };

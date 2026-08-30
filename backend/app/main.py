@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import Base, SessionLocal, engine
-from app.routers import account, auth, market_data, orders, positions, stocks, trades, watchlist
+from app.routers import account, auth, market_data, market_session, orders, positions, stocks, trades, watchlist
 from app.services.scheduler import start_scheduler, stop_scheduler
 from app.services.stock_sync import backfill_valuation_history, sync_stocks, sync_valuations
 
@@ -64,6 +64,7 @@ app.include_router(orders.router)
 app.include_router(trades.router)
 app.include_router(market_data.router)
 app.include_router(watchlist.router)
+app.include_router(market_session.router)
 
 
 @app.get("/health")

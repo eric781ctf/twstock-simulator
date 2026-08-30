@@ -13,14 +13,16 @@ router = APIRouter(prefix="/orders", tags=["orders"])
 
 
 @router.post("", response_model=OrderOut, status_code=201)
-def place_order(payload: OrderCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def place_order(
+    payload: OrderCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+):
     account = get_account_for_user(db, current_user.id)
     stock = db.get(Stock, payload.stock_code)
     if not stock:
         raise HTTPException(status_code=404, detail="股票代碼不存在")
 
     try:
-        order = create_order(db, account, stock, payload.side, payload.price, payload.quantity)
+        order = await create_order(db, account, stock, payload.side, payload.price, payload.quantity)
     except OrderValidationError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return order

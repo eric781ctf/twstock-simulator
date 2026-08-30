@@ -277,6 +277,44 @@ button.submit:disabled {
   margin-bottom: 10px;
 }
 
+.order-hint {
+  color: var(--muted);
+  font-size: 12px;
+  margin: -6px 0 10px;
+}
+
+.order-hint.warn {
+  color: var(--buy);
+}
+
+.market-session-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--muted);
+}
+
+.market-session-badge.trading {
+  color: var(--sell);
+  border-color: var(--sell);
+}
+
+.market-session-badge.after_hours {
+  color: var(--accent-2);
+  border-color: var(--accent-2);
+}
+
+.market-session-badge.closed {
+  color: var(--muted);
+}
+
 .table-scroll {
   overflow-x: auto;
 }
