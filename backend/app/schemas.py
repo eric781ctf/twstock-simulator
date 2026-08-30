@@ -18,7 +18,18 @@ class QuoteOut(BaseModel):
     name: str
     price: float | None
     prev_close: float | None
+    open: float | None = None
+    high: float | None = None
+    low: float | None = None
     is_stale: bool
+
+
+class FundamentalsOut(BaseModel):
+    stock_code: str
+    pe_ratio: float | None
+    dividend_yield: float | None
+    pb_ratio: float | None
+    updated_at: datetime | None
 
 
 class AccountOut(BaseModel):

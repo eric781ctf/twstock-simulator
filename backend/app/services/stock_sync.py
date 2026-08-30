@@ -2,8 +2,8 @@ import logging
 
 from sqlalchemy.orm import Session
 
-from app.models import DailyBar, Market, Stock
-from app.services.twse_client import fetch_listed_stocks, fetch_otc_stocks
+from app.models import DailyBar, Market, Stock, StockValuation
+from app.services.twse_client import fetch_listed_stocks, fetch_otc_stocks, fetch_valuations
 
 logger = logging.getLogger(__name__)
 
@@ -69,4 +69,42 @@ async def sync_stocks(db: Session) -> int:
 
     db.commit()
     logger.info("sync_stocks: 同步完成，共 %d 檔", count)
+    return count
+
+
+async def sync_valuations(db: Session) -> int:
+    """同步全市場本益比、殖利率、股價淨值比到 stock_valuations，供搜尋頁基本面區塊使用。
+    必須在 sync_stocks 之後呼叫，確保 stocks 表已經有對應的股票代碼（外鍵）。"""
+    items = await fetch_valuations()
+    if not items:
+        logger.warning("sync_valuations: 外部 API 無回傳資料，略過本次同步")
+        return 0
+
+    known_codes = {c for (c,) in db.query(Stock.code).all()}
+    items = [item for item in items if item["code"] in known_codes]
+
+    existing = {
+        v.stock_code: v
+        for v in db.query(StockValuation).filter(StockValuation.stock_code.in_([i["code"] for i in items])).all()
+    }
+
+    count = 0
+    for item in items:
+        code = item["code"]
+        if code in existing:
+            v = existing[code]
+            v.pe_ratio, v.dividend_yield, v.pb_ratio = item["pe_ratio"], item["dividend_yield"], item["pb_ratio"]
+        else:
+            db.add(
+                StockValuation(
+                    stock_code=code,
+                    pe_ratio=item["pe_ratio"],
+                    dividend_yield=item["dividend_yield"],
+                    pb_ratio=item["pb_ratio"],
+                )
+            )
+        count += 1
+
+    db.commit()
+    logger.info("sync_valuations: 同步完成，共 %d 檔", count)
     return count

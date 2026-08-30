@@ -9,7 +9,18 @@ export interface Quote {
   name: string;
   price: number | null;
   prev_close: number | null;
+  open: number | null;
+  high: number | null;
+  low: number | null;
   is_stale: boolean;
+}
+
+export interface Fundamentals {
+  stock_code: string;
+  pe_ratio: number | null;
+  dividend_yield: number | null;
+  pb_ratio: number | null;
+  updated_at: string | null;
 }
 
 export interface Account {
@@ -84,4 +95,5 @@ export interface WatchlistItem {
   stock_name: string;
   market: "TWSE" | "TPEX";
   created_at: string;
+  current_price: number | null;
 }

@@ -30,7 +30,14 @@ function downsampleToMinute(points: PricePoint[]): PricePoint[] {
   return [...byMinute.entries()].sort((a, b) => a[0] - b[0]).map(([, p]) => p);
 }
 
-export function LineTrendChart({ points }: { points: PricePoint[] }) {
+interface Props {
+  points: PricePoint[];
+  height?: number;
+  /** 沒有累積分時資料時（例如剛搜尋、還沒加自選股的股票），顯示連到外部站台的連結取代空白訊息。 */
+  fallbackLink?: string;
+}
+
+export function LineTrendChart({ points, height = 220, fallbackLink }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Line"> | null>(null);
@@ -41,7 +48,7 @@ export function LineTrendChart({ points }: { points: PricePoint[] }) {
 
     const chart = createChart(container, {
       width: container.clientWidth,
-      height: 220,
+      height,
       layout: { background: { color: "transparent" }, textColor: "#7688a8", fontSize: 11 },
       grid: { vertLines: { color: "rgba(255,255,255,0.04)" }, horzLines: { color: "rgba(255,255,255,0.04)" } },
       rightPriceScale: { borderColor: "#202a42" },
@@ -95,6 +102,17 @@ export function LineTrendChart({ points }: { points: PricePoint[] }) {
   }, [points]);
 
   if (points.length === 0) {
+    if (fallbackLink) {
+      return (
+        <div className="empty-hint">
+          這檔股票還沒有累積分時走勢資料（只有自選股會持續記錄）。
+          <br />
+          <a href={fallbackLink} target="_blank" rel="noreferrer" className="external-link">
+            前往 Yahoo 股市查看完整走勢 ↗
+          </a>
+        </div>
+      );
+    }
     return <div className="empty-hint">今日盤中走勢累積中，稍候再回來看</div>;
   }
 

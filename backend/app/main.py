@@ -8,7 +8,7 @@ from app.config import settings
 from app.database import Base, SessionLocal, engine
 from app.routers import account, auth, market_data, orders, positions, stocks, trades, watchlist
 from app.services.scheduler import start_scheduler, stop_scheduler
-from app.services.stock_sync import sync_stocks
+from app.services.stock_sync import sync_stocks, sync_valuations
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -23,6 +23,7 @@ async def lifespan(app: FastAPI):
         count = await sync_stocks(db)
         if count == 0:
             logger.warning("啟動時股票清單同步失敗或無資料，將於背景排程重試")
+        await sync_valuations(db)
     finally:
         db.close()
 

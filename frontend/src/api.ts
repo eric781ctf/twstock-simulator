@@ -2,6 +2,7 @@ import type {
   Account,
   AuthResponse,
   DailyBar,
+  Fundamentals,
   Order,
   OrderSide,
   OrderStatus,
@@ -59,6 +60,7 @@ export const api = {
   getDailyHistory: (code: string, months = 3) =>
     request<DailyBar[]>(`/stocks/${code}/daily-history?months=${months}`),
   getIntraday: (code: string) => request<PricePoint[]>(`/stocks/${code}/intraday`),
+  getFundamentals: (code: string) => request<Fundamentals>(`/stocks/${code}/fundamentals`),
   getPositions: () => request<Position[]>("/positions"),
   getOrders: (params?: { status?: OrderStatus; todayOnly?: boolean }) => {
     const q = new URLSearchParams();

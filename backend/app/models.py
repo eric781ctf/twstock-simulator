@@ -146,6 +146,19 @@ class PricePoint(Base):
     price: Mapped[float] = mapped_column(Float, nullable=False)
 
 
+class StockValuation(Base):
+    """個股本益比、殖利率、股價淨值比。每日同步時從 TWSE/TPEx 官方 API 覆蓋更新，
+    供搜尋頁的基本面區塊顯示。"""
+
+    __tablename__ = "stock_valuations"
+
+    stock_code: Mapped[str] = mapped_column(ForeignKey("stocks.code"), primary_key=True)
+    pe_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
+    dividend_yield: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pb_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class WatchlistItem(Base):
     """使用者自選股清單，每個帳戶最多 20 檔。清單內的股票會被排入每日分時資料
     的追蹤範圍（見 matching.run_matching_cycle），並顯示在該使用者首頁。"""

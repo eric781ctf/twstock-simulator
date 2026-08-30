@@ -11,7 +11,7 @@ from app.services.matching import (
     prune_old_price_points,
     run_matching_cycle,
 )
-from app.services.stock_sync import sync_stocks
+from app.services.stock_sync import sync_stocks, sync_valuations
 
 logger = logging.getLogger(__name__)
 

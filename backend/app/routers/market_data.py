@@ -5,7 +5,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import PricePoint, Stock
+from app.models import PricePoint, Stock, StockValuation
+from app.schemas import FundamentalsOut
 from app.services.history import get_daily_history
 from app.services.matching import TAIPEI_TZ
 
@@ -56,3 +57,22 @@ def intraday(code: str, db: Session = Depends(get_db)):
         .all()
     )
     return [PricePointOut(ts=p.ts.isoformat(), price=p.price) for p in points]
+
+
+@router.get("/{code}/fundamentals", response_model=FundamentalsOut)
+def fundamentals(code: str, db: Session = Depends(get_db)):
+    stock = db.get(Stock, code)
+    if not stock:
+        raise HTTPException(status_code=404, detail="股票代碼不存在")
+
+    v = db.get(StockValuation, code)
+    if not v:
+        return FundamentalsOut(stock_code=code, pe_ratio=None, dividend_yield=None, pb_ratio=None, updated_at=None)
+
+    return FundamentalsOut(
+        stock_code=code,
+        pe_ratio=v.pe_ratio,
+        dividend_yield=v.dividend_yield,
+        pb_ratio=v.pb_ratio,
+        updated_at=v.updated_at,
+    )

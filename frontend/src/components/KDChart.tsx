@@ -5,7 +5,7 @@ import type { DailyBar } from "../types";
 
 const RESET_EVENT = "twstock:reset-chart-range";
 
-export function KDChart({ bars }: { bars: DailyBar[] }) {
+export function KDChart({ bars, height = 110 }: { bars: DailyBar[]; height?: number }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const kSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
@@ -17,7 +17,7 @@ export function KDChart({ bars }: { bars: DailyBar[] }) {
 
     const chart = createChart(container, {
       width: container.clientWidth,
-      height: 110,
+      height,
       layout: { background: { color: "transparent" }, textColor: "#7688a8", fontSize: 11 },
       grid: { vertLines: { color: "rgba(255,255,255,0.04)" }, horzLines: { color: "rgba(255,255,255,0.04)" } },
       rightPriceScale: { borderColor: "#202a42" },
