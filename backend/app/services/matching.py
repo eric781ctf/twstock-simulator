@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import Account, Order, OrderStatus, Position, PricePoint, Side, Stock, Trade, WatchlistItem
+from app.services.app_config import get_default_initial_cash
 from app.services.fees import compute_amount, compute_commission, compute_tax
 from app.services.twse_client import fetch_quotes
 
@@ -41,7 +42,8 @@ def is_after_hours_window(now: datetime | None = None) -> bool:
 
 
 def create_account_for_user(db: Session, user_id: int) -> Account:
-    account = Account(user_id=user_id, name="我的帳戶", cash_balance=settings.initial_cash, frozen_cash=0)
+    initial_cash = get_default_initial_cash(db)
+    account = Account(user_id=user_id, name="我的帳戶", cash_balance=initial_cash, frozen_cash=0)
     db.add(account)
     db.commit()
     db.refresh(account)

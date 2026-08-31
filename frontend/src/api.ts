@@ -97,8 +97,12 @@ export const api = {
   getMarketSession: () => request<MarketSession>("/market/session"),
 
   getAdminAccounts: () => request<AdminAccount[]>("/admin/accounts"),
-  resetAllCash: (amount: number) =>
-    request<{ updated: number }>("/admin/accounts/reset-cash", { method: "POST", body: JSON.stringify({ amount }) }),
+  getDefaultInitialCash: () => request<{ amount: number }>("/admin/settings/default-initial-cash"),
+  setDefaultInitialCash: (amount: number) =>
+    request<{ amount: number }>("/admin/settings/default-initial-cash", {
+      method: "POST",
+      body: JSON.stringify({ amount }),
+    }),
   addCashToAll: (amount: number) =>
     request<{ updated: number }>("/admin/accounts/add-cash", { method: "POST", body: JSON.stringify({ amount }) }),
   deleteAccount: (userId: number) => request<{ deleted: boolean }>(`/admin/accounts/${userId}`, { method: "DELETE" }),

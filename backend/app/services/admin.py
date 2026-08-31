@@ -47,14 +47,6 @@ class AdminActionError(Exception):
     pass
 
 
-def reset_all_cash(db: Session, amount: float) -> int:
-    accounts = db.query(Account).join(User, Account.user_id == User.id).filter(User.is_admin.is_(False)).all()
-    for account in accounts:
-        account.cash_balance = amount
-    db.commit()
-    return len(accounts)
-
-
 def add_cash_to_all(db: Session, amount: float) -> int:
     accounts = db.query(Account).join(User, Account.user_id == User.id).filter(User.is_admin.is_(False)).all()
     for account in accounts:

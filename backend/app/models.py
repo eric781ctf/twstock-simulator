@@ -49,6 +49,17 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class AppConfig(Base):
+    """全站設定，目前只有一列（id 固定為 1）。放預設啟動資金這種「改了只影響
+    以後」的設定，跟個別帳戶的即時資料分開，也讓管理員改的值能重開機後還在，
+    不像 Settings 那樣只在啟動當下讀一次 .env。"""
+
+    __tablename__ = "app_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    default_initial_cash: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False)
+
+
 class Account(Base):
     __tablename__ = "accounts"
 

@@ -454,6 +454,13 @@ tbody tr:hover {
   margin: -4px 0 12px;
 }
 
+.admin-current-value {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--accent);
+  margin: 0 4px;
+}
+
 .admin-action-row {
   display: flex;
   gap: 10px;

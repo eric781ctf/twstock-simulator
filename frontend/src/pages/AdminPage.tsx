@@ -8,6 +8,7 @@ export default function AdminPage() {
   const { isAdmin } = useAuth();
   const [accounts, setAccounts] = useState<AdminAccount[]>([]);
   const [loading, setLoading] = useState(true);
+  const [defaultInitialCash, setDefaultInitialCashState] = useState<number | null>(null);
   const [resetAmount, setResetAmount] = useState("");
   const [addAmount, setAddAmount] = useState("");
   const [busy, setBusy] = useState(false);
@@ -19,16 +20,22 @@ export default function AdminPage() {
     setLoading(false);
   }, []);
 
+  const refreshDefaultCash = useCallback(async () => {
+    const res = await api.getDefaultInitialCash();
+    setDefaultInitialCashState(res.amount);
+  }, []);
+
   useEffect(() => {
     if (!isAdmin) return;
     refresh();
-  }, [isAdmin, refresh]);
+    refreshDefaultCash();
+  }, [isAdmin, refresh, refreshDefaultCash]);
 
   if (!isAdmin) {
     return <Navigate to="/" replace />;
   }
 
-  async function handleResetCash(e: React.FormEvent) {
+  async function handleSetDefaultCash(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     const amount = Number(resetAmount);
@@ -38,9 +45,9 @@ export default function AdminPage() {
     }
     setBusy(true);
     try {
-      await api.resetAllCash(amount);
+      await api.setDefaultInitialCash(amount);
       setResetAmount("");
-      await refresh();
+      await refreshDefaultCash();
     } catch (err) {
       setError(err instanceof Error ? err.message : "設定失敗");
     } finally {
@@ -93,9 +100,15 @@ export default function AdminPage() {
       <h2 className="section-title">管理後台</h2>
 
       <div className="admin-actions">
-        <form className="panel admin-action-card" onSubmit={handleResetCash}>
-          <h2>設定所有帳戶啟動資金</h2>
-          <p className="order-hint">將所有一般帳戶的現金餘額直接設定為以下金額</p>
+        <form className="panel admin-action-card" onSubmit={handleSetDefaultCash}>
+          <h2>新帳號啟動資金</h2>
+          <p className="order-hint">
+            目前預設值：
+            <span className="admin-current-value">
+              {defaultInitialCash != null ? defaultInitialCash.toLocaleString() : "載入中..."}
+            </span>
+            　只影響之後新註冊的帳號，不會更動現有帳戶的餘額
+          </p>
           <div className="admin-action-row">
             <input
               type="number"

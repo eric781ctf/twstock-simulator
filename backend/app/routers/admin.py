@@ -3,8 +3,9 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import User
-from app.schemas import AdminAccountOut, AdminAmountIn
-from app.services.admin import AdminActionError, add_cash_to_all, delete_account, freeze_account, list_all_accounts, reset_all_cash
+from app.schemas import AdminAmountIn, AdminAccountOut, DefaultInitialCashOut
+from app.services.admin import AdminActionError, add_cash_to_all, delete_account, freeze_account, list_all_accounts
+from app.services.app_config import get_default_initial_cash, set_default_initial_cash
 from app.services.auth import require_admin
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -28,10 +29,15 @@ def get_accounts(db: Session = Depends(get_db), _: User = Depends(require_admin)
     ]
 
 
-@router.post("/accounts/reset-cash")
-def reset_cash(payload: AdminAmountIn, db: Session = Depends(get_db), _: User = Depends(require_admin)):
-    count = reset_all_cash(db, payload.amount)
-    return {"updated": count}
+@router.get("/settings/default-initial-cash", response_model=DefaultInitialCashOut)
+def get_default_cash(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    return DefaultInitialCashOut(amount=get_default_initial_cash(db))
+
+
+@router.post("/settings/default-initial-cash", response_model=DefaultInitialCashOut)
+def update_default_cash(payload: AdminAmountIn, db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    amount = set_default_initial_cash(db, payload.amount)
+    return DefaultInitialCashOut(amount=amount)
 
 
 @router.post("/accounts/add-cash")

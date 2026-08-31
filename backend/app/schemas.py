@@ -102,6 +102,10 @@ class AdminAmountIn(BaseModel):
     amount: float = Field(gt=0)
 
 
+class DefaultInitialCashOut(BaseModel):
+    amount: float
+
+
 class MarketSessionOut(BaseModel):
     status: Literal["trading", "after_hours", "closed"]
     trading_start: str
