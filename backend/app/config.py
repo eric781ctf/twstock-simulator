@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     tax_rate: float = 0.003
     cors_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]
 
+    admin_username: str = "admin"
+    admin_password: str = "admin"
+
     # 沒有預設值：沒有透過 TWSTOCK_JWT_SECRET 設定就直接啟動失敗，
     # 避免有人忘記覆蓋、讓一個公開在原始碼裡的密鑰變成正式簽章金鑰。
     jwt_secret: str

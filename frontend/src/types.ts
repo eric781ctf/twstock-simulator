@@ -82,6 +82,18 @@ export interface AuthResponse {
   token_type: string;
   username: string;
   nickname: string;
+  is_admin: boolean;
+}
+
+export interface AdminAccount {
+  user_id: number;
+  username: string;
+  nickname: string;
+  is_admin: boolean;
+  cash_balance: number | null;
+  frozen_cash: number | null;
+  frozen_until: string | null;
+  created_at: string;
 }
 
 export interface LeaderboardEntry {

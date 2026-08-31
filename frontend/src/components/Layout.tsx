@@ -3,7 +3,7 @@ import { NavLink, Navigate, Outlet, useLocation, useNavigate } from "react-route
 import { useAuth } from "../auth/AuthContext";
 
 export function Layout() {
-  const { isAuthenticated, nickname, username, logout } = useAuth();
+  const { isAuthenticated, nickname, username, isAdmin, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -36,6 +36,11 @@ export function Layout() {
   function handleLeaderboard() {
     setMenuOpen(false);
     navigate("/leaderboard");
+  }
+
+  function handleAdmin() {
+    setMenuOpen(false);
+    navigate("/admin");
   }
 
   return (
@@ -72,6 +77,7 @@ export function Layout() {
           {menuOpen && (
             <div className="nav-user-menu">
               <button onClick={handleLeaderboard}>排行榜</button>
+              {isAdmin && <button onClick={handleAdmin}>管理後台</button>}
               <button className="danger" onClick={handleLogout}>登出</button>
             </div>
           )}

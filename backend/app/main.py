@@ -7,7 +7,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import Base, SessionLocal, engine
-from app.routers import account, auth, leaderboard, market_data, market_session, orders, positions, stocks, trades, watchlist
+from app.routers import account, admin, auth, leaderboard, market_data, market_session, orders, positions, stocks, trades, watchlist
+from app.services.admin import ensure_admin_user
 from app.services.migrations import run_lightweight_migrations
 from app.services.scheduler import start_scheduler, stop_scheduler
 from app.services.stock_sync import backfill_valuation_history, sync_stocks, sync_valuations
@@ -34,6 +35,7 @@ async def lifespan(app: FastAPI):
 
     db = SessionLocal()
     try:
+        ensure_admin_user(db)
         count = await sync_stocks(db)
         if count == 0:
             logger.warning("啟動時股票清單同步失敗或無資料，將於背景排程重試")
@@ -68,6 +70,7 @@ app.include_router(market_data.router)
 app.include_router(watchlist.router)
 app.include_router(leaderboard.router)
 app.include_router(market_session.router)
+app.include_router(admin.router)
 
 
 @app.get("/health")

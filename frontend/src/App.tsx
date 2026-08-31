@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider } from "./auth/AuthContext";
 import { Layout } from "./components/Layout";
+import AdminPage from "./pages/AdminPage";
 import HomePage from "./pages/HomePage";
 import LeaderboardPage from "./pages/LeaderboardPage";
 import LoginPage from "./pages/LoginPage";
@@ -25,6 +26,7 @@ export default function App() {
             <Route path="/history" element={<TradeHistoryPage />} />
             <Route path="/positions" element={<PositionPage />} />
             <Route path="/leaderboard" element={<LeaderboardPage />} />
+            <Route path="/admin" element={<AdminPage />} />
             <Route path="/tutorial" element={<TutorialPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
