@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { api } from "../api";
+import { AmountInput } from "../components/AmountInput";
 import { useAuth } from "../auth/AuthContext";
 import type { AdminAccount } from "../types";
 
@@ -110,12 +111,7 @@ export default function AdminPage() {
             　只影響之後新註冊的帳號，不會更動現有帳戶的餘額
           </p>
           <div className="admin-action-row">
-            <input
-              type="number"
-              placeholder="金額"
-              value={resetAmount}
-              onChange={(e) => setResetAmount(e.target.value)}
-            />
+            <AmountInput placeholder="金額" value={resetAmount} onChange={setResetAmount} />
             <button className="submit" type="submit" disabled={busy}>
               設定
             </button>
@@ -126,7 +122,7 @@ export default function AdminPage() {
           <h2>為所有帳戶加值</h2>
           <p className="order-hint">為每個一般帳戶的現金餘額增加以下金額</p>
           <div className="admin-action-row">
-            <input type="number" placeholder="金額" value={addAmount} onChange={(e) => setAddAmount(e.target.value)} />
+            <AmountInput placeholder="金額" value={addAmount} onChange={setAddAmount} />
             <button className="submit" type="submit" disabled={busy}>
               加值
             </button>
