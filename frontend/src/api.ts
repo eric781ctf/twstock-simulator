@@ -13,6 +13,9 @@ import type {
   PricePoint,
   Quote,
   Stock,
+  Strategy,
+  StrategyInput,
+  StrategyTradeRecord,
   Trade,
   WatchlistItem,
 } from "./types";
@@ -94,4 +97,14 @@ export const api = {
   getLeaderboard: () => request<LeaderboardEntry[]>("/leaderboard"),
 
   getMarketSession: () => request<MarketSession>("/market/session"),
+
+  getStrategies: () => request<Strategy[]>("/strategies"),
+  createStrategy: (payload: StrategyInput) =>
+    request<Strategy>("/strategies", { method: "POST", body: JSON.stringify(payload) }),
+  updateStrategy: (id: number, payload: StrategyInput) =>
+    request<Strategy>(`/strategies/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
+  deleteStrategy: (id: number) => request<{ deleted: boolean }>(`/strategies/${id}`, { method: "DELETE" }),
+  activateStrategy: (id: number) => request<Strategy>(`/strategies/${id}/activate`, { method: "POST" }),
+  deactivateStrategy: (id: number) => request<Strategy>(`/strategies/${id}/deactivate`, { method: "POST" }),
+  getStrategyTrades: (id: number) => request<StrategyTradeRecord[]>(`/strategies/${id}/trades`),
 };

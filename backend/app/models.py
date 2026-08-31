@@ -2,6 +2,8 @@ import enum
 from datetime import date, datetime
 
 from sqlalchemy import (
+    JSON,
+    Boolean,
     Date,
     DateTime,
     Enum,
@@ -161,6 +163,47 @@ class StockValuationHistory(Base):
     pe_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
     dividend_yield: Mapped[float | None] = mapped_column(Float, nullable=True)
     pb_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
+class Strategy(Base):
+    """自動化交易策略。買進條件掃描全市場（凡是本地有足夠日K資料的股票都會被檢查），
+    依 rank_by 排序後只對前 top_n 檔下單；賣出條件套用在該帳戶「目前所有持股」上，
+    不限定是不是這組策略買的。同一帳戶同時只會有一組 is_active=True（由
+    routers/strategies.py 的 activate 端點負責切換，非資料庫層級約束）。"""
+
+    __tablename__ = "strategies"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(50), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    buy_conditions: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    sell_conditions: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    rank_by: Mapped[str] = mapped_column(String(20), nullable=False, default="change_percent")
+    rank_direction: Mapped[str] = mapped_column(String(4), nullable=False, default="desc")
+    top_n: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class StrategyTrade(Base):
+    """策略自動下單的執行紀錄，同時也是「同一天同一檔股票同方向不重複下單」的
+    去重依據——每分鐘都會重新檢查條件，沒有這個表會一直重複買/賣同一檔。"""
+
+    __tablename__ = "strategy_trades"
+    __table_args__ = (
+        UniqueConstraint("strategy_id", "stock_code", "side", "trade_date", name="uq_strategy_trade_daily"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    strategy_id: Mapped[int] = mapped_column(ForeignKey("strategies.id"), nullable=False)
+    stock_code: Mapped[str] = mapped_column(ForeignKey("stocks.code"), nullable=False)
+    side: Mapped[Side] = mapped_column(Enum(Side), nullable=False)
+    trade_date: Mapped[date] = mapped_column(Date, nullable=False)
+    order_id: Mapped[int | None] = mapped_column(ForeignKey("orders.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    stock: Mapped["Stock"] = relationship()
 
 
 class WatchlistItem(Base):

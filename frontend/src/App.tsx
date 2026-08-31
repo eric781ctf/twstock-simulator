@@ -7,6 +7,7 @@ import LoginPage from "./pages/LoginPage";
 import PositionPage from "./pages/PositionPage";
 import RegisterPage from "./pages/RegisterPage";
 import SearchPage from "./pages/SearchPage";
+import StrategyPage from "./pages/StrategyPage";
 import TradeHistoryPage from "./pages/TradeHistoryPage";
 import TradePage from "./pages/TradePage";
 import TutorialPage from "./pages/TutorialPage";
@@ -24,6 +25,7 @@ export default function App() {
             <Route path="/search" element={<SearchPage />} />
             <Route path="/history" element={<TradeHistoryPage />} />
             <Route path="/positions" element={<PositionPage />} />
+            <Route path="/strategy" element={<StrategyPage />} />
             <Route path="/leaderboard" element={<LeaderboardPage />} />
             <Route path="/tutorial" element={<TutorialPage />} />
           </Route>
