@@ -8,6 +8,7 @@ from app.config import settings
 from app.models import Account, Order, OrderStatus, Position, PricePoint, Side, Stock, Trade, WatchlistItem
 from app.services.app_config import get_default_initial_cash
 from app.services.fees import compute_amount, compute_commission, compute_tax
+from app.services.quote_cache import get_quotes_cached, store_many
 from app.services.twse_client import fetch_quotes
 
 logger = logging.getLogger(__name__)
@@ -74,7 +75,29 @@ class OrderValidationError(Exception):
     pass
 
 
-async def create_order(db: Session, account: Account, stock: Stock, side: Side, price: float, quantity: int) -> Order:
+async def create_order(
+    db: Session,
+    account: Account,
+    stock: Stock,
+    side: Side,
+    order_type: str,
+    price: float | None,
+    stop_price: float | None,
+    quantity: int,
+) -> Order:
+    """order_type 是 "limit" | "market" | "stop"：
+    - limit：跟以前一樣，掛著等 run_matching_cycle 比價成交。
+    - market：不管現在盤中還是盤後，送出當下就用即時報價立刻成交（跟盤後單共用
+      同一套「當下抓報價、馬上填單」邏輯，只是不限盤後才能用）。停損單觸發之後
+      也是走這條路——觸發價只是「要不要成交」的判斷依據，一旦觸發就是用當下
+      市價立刻成交，不是另外掛一張限價單。
+    - stop：只能在盤中下單，先當一張「還沒觸發」的掛單掛著，交給
+      run_matching_cycle 每輪檢查市價有沒有碰到 stop_price；碰到才真的成交
+      （見該函式），這裡不做任何成交動作。
+
+    market/盤後單需要「送出當下」的報價，用 get_quotes_cached 而不是直接呼叫
+    fetch_quotes——多數情況下這檔股票剛被使用者在下單面板查過、或本來就在
+    自選股/持股裡被輪詢追蹤著，可以直接沿用最近的報價，不用多打一次 API。"""
     now = datetime.now(TAIPEI_TZ)
     trading = is_trading_hours(now)
     after_hours = not trading and is_after_hours_window(now)
@@ -82,14 +105,23 @@ async def create_order(db: Session, account: Account, stock: Stock, side: Side, 
     if not trading and not after_hours:
         raise OrderValidationError("目前非可下單時段（盤中或盤後至 24:00 前才能下單）")
 
-    if after_hours:
-        # 盤後只能用「收盤價」成交，不是使用者自訂的限價；此時 mis.twse 的報價已經停在
-        # 當天最後一筆成交價，等同收盤價，直接拿來當成交價使用並立刻成交。
-        quote = await fetch_quotes([(stock.code, stock.market.value)])
+    if order_type == "stop" and after_hours:
+        raise OrderValidationError("停損單只能在盤中時段下單")
+
+    immediate_fill = after_hours or order_type == "market"
+
+    if immediate_fill:
+        # 盤後單用「收盤價」（mis.twse 收盤後就是停在最後一筆成交價）；
+        # 盤中的市價單一樣用這個當下的即時報價立刻成交。
+        quote = await get_quotes_cached([(stock.code, stock.market.value)])
         q = quote.get(stock.code)
         if not q or q["price"] is None:
-            raise OrderValidationError("目前無法取得今日收盤價，請稍後再試")
+            raise OrderValidationError("目前無法取得即時報價，請稍後再試")
         price = q["price"]
+    elif order_type == "stop":
+        # 還沒觸發，用 stop_price 當資金/庫存凍結的估算基準；實際成交價要等
+        # 真的觸發那一刻的市價才知道。
+        price = stop_price
 
     if side == Side.BUY:
         amount = compute_amount(price, quantity)
@@ -103,7 +135,9 @@ async def create_order(db: Session, account: Account, stock: Stock, side: Side, 
             account_id=account.id,
             stock_code=stock.code,
             side=side,
+            order_type=order_type,
             price=price,
+            stop_price=stop_price if order_type == "stop" else None,
             quantity=quantity,
             status=OrderStatus.PENDING,
             reserved_amount=required,
@@ -118,7 +152,9 @@ async def create_order(db: Session, account: Account, stock: Stock, side: Side, 
             account_id=account.id,
             stock_code=stock.code,
             side=side,
+            order_type=order_type,
             price=price,
+            stop_price=stop_price if order_type == "stop" else None,
             quantity=quantity,
             status=OrderStatus.PENDING,
         )
@@ -126,7 +162,7 @@ async def create_order(db: Session, account: Account, stock: Stock, side: Side, 
     db.add(order)
     db.flush()
 
-    if after_hours:
+    if immediate_fill:
         _fill_order(db, order, price)
 
     db.commit()
@@ -158,6 +194,7 @@ def _fill_order(db: Session, order: Order, fill_price: float) -> None:
     position = _get_or_create_position(db, order.account_id, order.stock_code)
     amount = compute_amount(fill_price, order.quantity)
     fee = compute_commission(amount)
+    realized_pnl: float | None = None
 
     if order.side == Side.BUY:
         tax = 0.0
@@ -172,6 +209,11 @@ def _fill_order(db: Session, order: Order, fill_price: float) -> None:
     else:
         tax = compute_tax(amount)
         net_proceeds = amount - fee - tax
+        # 均成本在賣出這條路徑不會被動到（只有買進會重算），所以賣出當下的
+        # avg_cost 就是這批股票的成本基礎，先在這裡存成本地變數，才不會被
+        # 底下「賣光歸零」的邏輯影響到已實現損益的計算。
+        cost_basis = float(position.avg_cost) * order.quantity
+        realized_pnl = net_proceeds - cost_basis
         account.cash_balance = float(account.cash_balance) + net_proceeds
 
         position.frozen_quantity = max(0, position.frozen_quantity - order.quantity)
@@ -194,6 +236,7 @@ def _fill_order(db: Session, order: Order, fill_price: float) -> None:
         amount=amount,
         fee=fee,
         tax=tax,
+        realized_pnl=realized_pnl,
     )
     db.add(trade)
 
@@ -240,6 +283,7 @@ async def run_matching_cycle(db: Session) -> int:
         codes_with_market.setdefault(item.stock_code, item.stock.market.value)
 
     quotes = await fetch_quotes(list(codes_with_market.items()))
+    store_many(quotes)  # 讓市價單/停損觸發等「當下」查詢可以直接沿用這批報價
 
     filled_count = 0
     for order in pending_orders:
@@ -247,6 +291,17 @@ async def run_matching_cycle(db: Session) -> int:
         if not quote or quote["price"] is None:
             continue
         market_price = quote["price"]
+
+        if order.stop_price is not None:
+            # 停損單：還沒觸發前不管 order.price（那只是資金/庫存凍結的估算基準），
+            # 觸發判斷只看 stop_price；一觸發就直接用當下市價成交（停損-市價單）。
+            triggered = (order.side == Side.SELL and market_price <= float(order.stop_price)) or (
+                order.side == Side.BUY and market_price >= float(order.stop_price)
+            )
+            if triggered:
+                _fill_order(db, order, market_price)
+                filled_count += 1
+            continue
 
         if order.side == Side.BUY and market_price <= float(order.price):
             _fill_order(db, order, market_price)

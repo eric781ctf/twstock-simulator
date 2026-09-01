@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Stock
 from app.schemas import QuoteOut, StockOut
-from app.services.twse_client import fetch_quotes
+from app.services.quote_cache import get_quotes_cached
 
 router = APIRouter(prefix="/stocks", tags=["stocks"])
 
@@ -25,7 +25,7 @@ async def get_quote(code: str, db: Session = Depends(get_db)):
     if not stock:
         raise HTTPException(status_code=404, detail="股票代碼不存在")
 
-    quotes = await fetch_quotes([(stock.code, stock.market.value)])
+    quotes = await get_quotes_cached([(stock.code, stock.market.value)])
     quote = quotes.get(stock.code)
     if not quote:
         return QuoteOut(code=stock.code, name=stock.name, price=None, prev_close=None, is_stale=True)

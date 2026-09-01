@@ -24,6 +24,7 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
             <th>金額</th>
             <th>手續費</th>
             <th>交易稅</th>
+            <th>已實現損益</th>
             <th>時間</th>
           </tr>
         </thead>
@@ -37,6 +38,9 @@ export function TradesTable({ trades }: { trades: Trade[] }) {
               <td>{t.amount.toFixed(0)}</td>
               <td>{t.fee.toFixed(0)}</td>
               <td>{t.tax.toFixed(0)}</td>
+              <td className={t.realized_pnl == null ? "" : t.realized_pnl >= 0 ? "buy-text" : "sell-text"}>
+                {t.realized_pnl != null ? t.realized_pnl.toFixed(0) : "-"}
+              </td>
               <td>{new Date(t.executed_at).toLocaleTimeString("zh-TW", { hour12: false })}</td>
             </tr>
           ))}

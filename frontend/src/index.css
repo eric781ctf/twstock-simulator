@@ -242,6 +242,32 @@ input[type="date"] {
   box-shadow: var(--glow-sell);
 }
 
+.order-type-toggle {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.order-type-toggle button {
+  flex: 1;
+  padding: 7px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--input-bg);
+  color: var(--muted);
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13px;
+  font-family: var(--font-ui);
+  transition: all 0.2s ease;
+}
+
+.order-type-toggle button.active {
+  background: rgba(79, 195, 255, 0.15);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
 button.submit {
   width: 100%;
   padding: 11px;

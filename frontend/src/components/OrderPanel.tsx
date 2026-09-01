@@ -1,7 +1,13 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { api } from "../api";
 import { AmountInput } from "./AmountInput";
-import type { MarketSession, OrderSide, Quote, Stock } from "../types";
+import type { MarketSession, OrderSide, OrderType, Quote, Stock } from "../types";
+
+const ORDER_TYPE_LABEL: Record<OrderType, string> = {
+  limit: "限價",
+  market: "市價",
+  stop: "停損",
+};
 
 export interface OrderPrefill {
   stockCode: string;
@@ -22,7 +28,9 @@ export function OrderPanel({ onOrderPlaced, prefill, marketSession }: Props) {
   const [selected, setSelected] = useState<Stock | null>(null);
   const [quote, setQuote] = useState<Quote | null>(null);
   const [side, setSide] = useState<OrderSide>("buy");
+  const [orderType, setOrderType] = useState<OrderType>("limit");
   const [price, setPrice] = useState("");
+  const [stopPrice, setStopPrice] = useState("");
   const [quantity, setQuantity] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -84,21 +92,42 @@ export function OrderPanel({ onOrderPlaced, prefill, marketSession }: Props) {
       setError("非交易時間，暫不接受下單");
       return;
     }
-    const priceNum = Number(price);
     const qtyNum = Number(quantity);
-    if (!priceNum || priceNum <= 0) {
-      setError(isAfterHours ? "目前無收盤價資訊，請稍後再試" : "請輸入有效限價");
-      return;
-    }
     if (!qtyNum || qtyNum <= 0 || qtyNum >= 1000) {
       setError("零股股數需介於 1~999 股");
       return;
     }
 
+    const effectiveType: OrderType = isAfterHours ? "limit" : orderType;
+    let priceNum: number | undefined;
+    let stopPriceNum: number | undefined;
+
+    if (effectiveType === "limit") {
+      priceNum = Number(price);
+      if (!priceNum || priceNum <= 0) {
+        setError(isAfterHours ? "目前無收盤價資訊，請稍後再試" : "請輸入有效限價");
+        return;
+      }
+    } else if (effectiveType === "stop") {
+      stopPriceNum = Number(stopPrice);
+      if (!stopPriceNum || stopPriceNum <= 0) {
+        setError("請輸入有效觸發價");
+        return;
+      }
+    }
+
     setSubmitting(true);
     try {
-      await api.placeOrder({ stock_code: selected.code, side, price: priceNum, quantity: qtyNum });
+      await api.placeOrder({
+        stock_code: selected.code,
+        side,
+        order_type: effectiveType,
+        price: priceNum,
+        stop_price: stopPriceNum,
+        quantity: qtyNum,
+      });
       setQuantity("");
+      setStopPrice("");
       onOrderPlaced();
     } catch (err) {
       setError(err instanceof Error ? err.message : "下單失敗");
@@ -145,13 +174,36 @@ export function OrderPanel({ onOrderPlaced, prefill, marketSession }: Props) {
             賣出
           </button>
         </div>
-        <AmountInput
-          placeholder={isAfterHours ? "收盤價" : "限價"}
-          value={price}
-          readOnly={isAfterHours}
-          onChange={setPrice}
-        />
+        {!isAfterHours && !isClosed && (
+          <div className="order-type-toggle">
+            {(["limit", "market", "stop"] as OrderType[]).map((t) => (
+              <button
+                type="button"
+                key={t}
+                className={orderType === t ? "active" : ""}
+                onClick={() => setOrderType(t)}
+              >
+                {ORDER_TYPE_LABEL[t]}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {isAfterHours ? (
+          <AmountInput placeholder="收盤價" value={price} readOnly onChange={setPrice} />
+        ) : orderType === "limit" ? (
+          <AmountInput placeholder="限價" value={price} onChange={setPrice} />
+        ) : orderType === "stop" ? (
+          <AmountInput placeholder="觸發價" value={stopPrice} onChange={setStopPrice} />
+        ) : null}
+
         {isAfterHours && <div className="order-hint">盤後{sideLabel}將以今日收盤價成交，送出後立即成交</div>}
+        {!isAfterHours && orderType === "market" && <div className="order-hint">送出後立即以當下市價{sideLabel}</div>}
+        {!isAfterHours && orderType === "stop" && (
+          <div className="order-hint">
+            市價{side === "sell" ? "跌破" : "漲破"}觸發價時，將立即以市價{sideLabel}
+          </div>
+        )}
         {isClosed && <div className="order-hint warn">非交易時間，暫不接受{sideLabel}委託</div>}
         <input
           type="number"
@@ -161,7 +213,11 @@ export function OrderPanel({ onOrderPlaced, prefill, marketSession }: Props) {
         />
         {error && <div className="error-msg">{error}</div>}
         <button className="submit" type="submit" disabled={submitting || isClosed}>
-          {submitting ? "送出中..." : isAfterHours ? `送出盤後${sideLabel}單` : side === "buy" ? "送出買單" : "送出賣單"}
+          {submitting
+            ? "送出中..."
+            : isAfterHours
+              ? `送出盤後${sideLabel}單`
+              : `送出${ORDER_TYPE_LABEL[orderType]}${sideLabel}單`}
         </button>
       </form>
     </div>

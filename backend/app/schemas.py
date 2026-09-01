@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.models import Market, OrderStatus, Side
 
@@ -57,8 +57,18 @@ class PositionOut(BaseModel):
 class OrderCreate(BaseModel):
     stock_code: str
     side: Side
-    price: float = Field(gt=0)
+    order_type: Literal["limit", "market", "stop"] = "limit"
+    price: float | None = Field(default=None, gt=0)
+    stop_price: float | None = Field(default=None, gt=0)
     quantity: int = Field(gt=0, lt=1000)
+
+    @model_validator(mode="after")
+    def _check_price_fields(self):
+        if self.order_type == "limit" and self.price is None:
+            raise ValueError("限價單需要輸入價格")
+        if self.order_type == "stop" and self.stop_price is None:
+            raise ValueError("停損單需要輸入觸發價")
+        return self
 
 
 class OrderOut(BaseModel):
@@ -67,7 +77,9 @@ class OrderOut(BaseModel):
     id: int
     stock_code: str
     side: Side
+    order_type: str
     price: float
+    stop_price: float | None
     quantity: int
     status: OrderStatus
     created_at: datetime
@@ -195,4 +207,12 @@ class TradeOut(BaseModel):
     amount: float
     fee: float
     tax: float
+    realized_pnl: float | None
     executed_at: datetime
+
+
+class RealizedPnlSummaryOut(BaseModel):
+    total_realized_pnl: float
+    win_count: int
+    loss_count: int
+    win_rate: float | None

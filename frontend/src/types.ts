@@ -51,12 +51,15 @@ export interface Position {
 
 export type OrderSide = "buy" | "sell";
 export type OrderStatus = "pending" | "filled" | "cancelled" | "expired";
+export type OrderType = "limit" | "market" | "stop";
 
 export interface Order {
   id: number;
   stock_code: string;
   side: OrderSide;
+  order_type: OrderType;
   price: number;
+  stop_price: number | null;
   quantity: number;
   status: OrderStatus;
   created_at: string;
@@ -74,7 +77,15 @@ export interface Trade {
   amount: number;
   fee: number;
   tax: number;
+  realized_pnl: number | null;
   executed_at: string;
+}
+
+export interface RealizedPnlSummary {
+  total_realized_pnl: number;
+  win_count: number;
+  loss_count: number;
+  win_rate: number | null;
 }
 
 export interface AuthResponse {
