@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { api } from "../api";
+import { AmountInput } from "./AmountInput";
 import type { MarketSession, OrderSide, Quote, Stock } from "../types";
 
 export interface OrderPrefill {
@@ -144,13 +145,11 @@ export function OrderPanel({ onOrderPlaced, prefill, marketSession }: Props) {
             賣出
           </button>
         </div>
-        <input
-          type="number"
-          step="0.01"
+        <AmountInput
           placeholder={isAfterHours ? "收盤價" : "限價"}
           value={price}
           readOnly={isAfterHours}
-          onChange={(e) => setPrice(e.target.value)}
+          onChange={setPrice}
         />
         {isAfterHours && <div className="order-hint">盤後{sideLabel}將以今日收盤價成交，送出後立即成交</div>}
         {isClosed && <div className="order-hint warn">非交易時間，暫不接受{sideLabel}委託</div>}

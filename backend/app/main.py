@@ -9,6 +9,7 @@ from app.config import settings
 from app.database import Base, SessionLocal, engine
 from app.routers import (
     account,
+    admin,
     auth,
     leaderboard,
     market_data,
@@ -20,6 +21,8 @@ from app.routers import (
     trades,
     watchlist,
 )
+from app.services.admin import ensure_admin_user
+from app.services.app_config import ensure_app_config
 from app.services.migrations import run_lightweight_migrations
 from app.services.scheduler import start_scheduler, stop_scheduler
 from app.services.stock_sync import backfill_all_twse_daily_bars, backfill_valuation_history, sync_stocks, sync_valuations
@@ -59,6 +62,8 @@ async def lifespan(app: FastAPI):
 
     db = SessionLocal()
     try:
+        ensure_app_config(db)
+        ensure_admin_user(db)
         count = await sync_stocks(db)
         if count == 0:
             logger.warning("啟動時股票清單同步失敗或無資料，將於背景排程重試")
@@ -96,6 +101,7 @@ app.include_router(watchlist.router)
 app.include_router(leaderboard.router)
 app.include_router(market_session.router)
 app.include_router(strategies.router)
+app.include_router(admin.router)
 
 
 @app.get("/health")

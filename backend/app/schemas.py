@@ -87,6 +87,25 @@ class WatchlistCreate(BaseModel):
     stock_code: str
 
 
+class AdminAccountOut(BaseModel):
+    user_id: int
+    username: str
+    nickname: str
+    is_admin: bool
+    cash_balance: float | None
+    frozen_cash: float | None
+    frozen_until: datetime | None
+    created_at: datetime
+
+
+class AdminAmountIn(BaseModel):
+    amount: float = Field(gt=0)
+
+
+class DefaultInitialCashOut(BaseModel):
+    amount: float
+
+
 class MarketSessionOut(BaseModel):
     status: Literal["trading", "after_hours", "closed"]
     trading_start: str

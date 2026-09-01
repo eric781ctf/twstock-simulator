@@ -42,4 +42,12 @@ def get_current_user(
     user = db.get(User, user_id)
     if user is None:
         raise HTTPException(status_code=401, detail="使用者不存在")
+    if user.frozen_until is not None and user.frozen_until > datetime.now(timezone.utc):
+        raise HTTPException(status_code=403, detail=f"帳號已被凍結，將於 {user.frozen_until.isoformat()} 解除")
     return user
+
+
+def require_admin(current_user: User = Depends(get_current_user)) -> User:
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="僅限管理員使用")
+    return current_user
