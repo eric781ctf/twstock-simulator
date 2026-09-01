@@ -64,6 +64,7 @@ export default function StrategyPage() {
   const [busy, setBusy] = useState(false);
   const [tradesFor, setTradesFor] = useState<number | null>(null);
   const [trades, setTrades] = useState<StrategyTradeRecord[]>([]);
+  const [strategyEnabled, setStrategyEnabled] = useState<boolean | null>(null);
 
   const refresh = useCallback(async () => {
     const res = await api.getStrategies();
@@ -72,7 +73,13 @@ export default function StrategyPage() {
   }, []);
 
   useEffect(() => {
-    refresh();
+    async function checkFeature() {
+      const flags = await api.getFeatureFlags();
+      const enabled = flags.strategy !== false;
+      setStrategyEnabled(enabled);
+      if (enabled) refresh();
+    }
+    checkFeature();
   }, [refresh]);
 
   function openNewForm() {
@@ -155,6 +162,23 @@ export default function StrategyPage() {
     const res = await api.getStrategyTrades(strategy.id);
     setTrades(res);
     setTradesFor(strategy.id);
+  }
+
+  if (strategyEnabled === null) {
+    return null;
+  }
+
+  if (strategyEnabled === false) {
+    return (
+      <>
+        <h2 className="section-title">策略</h2>
+        <div className="panel maintenance-panel">
+          <div className="maintenance-icon">🛠️</div>
+          <h2>策略功能維護中</h2>
+          <p className="empty-hint">管理員暫時關閉了這個功能，請稍後再回來查看。</p>
+        </div>
+      </>
+    );
   }
 
   return (

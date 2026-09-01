@@ -61,6 +61,17 @@ class AppConfig(Base):
     default_initial_cash: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False)
 
 
+class FeatureFlag(Base):
+    """功能模組開關，讓管理員不用重新部署就能暫停某個功能。key 是固定的
+    字串代碼（見 services/feature_flags.py 的 FLAG_KEYS），不是給使用者
+    自訂的名稱。"""
+
+    __tablename__ = "feature_flags"
+
+    key: Mapped[str] = mapped_column(String(50), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+
 class Account(Base):
     __tablename__ = "accounts"
 

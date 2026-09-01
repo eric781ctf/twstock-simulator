@@ -21,9 +21,10 @@ VALUATION_BACKFILL_MONTHS = 36
 DAILY_BAR_BACKFILL_MONTHS = 3
 DAILY_BAR_MIN_BARS = 40  # 一季約 60 個交易日，抓「明顯不足」的門檻不用抓到剛好
 DAILY_BAR_BATCH_SIZE = 20
-DAILY_BAR_BATCH_DELAY_SECONDS = 5.0
-DAILY_BAR_REQUEST_DELAY_SECONDS = 0.5  # 同一檔股票內，每個月份請求之間的間隔
-DAILY_BAR_STOCK_DELAY_SECONDS = 0.5  # 批次內，股票跟股票之間的間隔
+DAILY_BAR_BATCH_DELAY_SECONDS = 1200.0
+DAILY_BAR_REQUEST_DELAY_SECONDS = 10.0  # 同一檔股票內，每個月份請求之間的間隔
+DAILY_BAR_STOCK_DELAY_SECONDS = 60.0  # 批次內，股票跟股票之間的間隔
+DAILY_BAR_MAX_PER_RUN = 100  # 每次排程/啟動最多處理幾檔，其餘留給下一次
 _HEADERS = {"User-Agent": "Mozilla/5.0 (twstock-simulator)"}
 
 
@@ -181,16 +182,20 @@ async def backfill_all_twse_daily_bars(
     months: int = DAILY_BAR_BACKFILL_MONTHS,
     batch_size: int = DAILY_BAR_BATCH_SIZE,
     delay_seconds: float = DAILY_BAR_BATCH_DELAY_SECONDS,
+    max_per_run: int = DAILY_BAR_MAX_PER_RUN,
 ) -> int:
     """幫「所有」上市股票回補約 months 個月的日 K 線，不像 sync_stocks 每天只拿
     今天一筆——TWSE 的 STOCK_DAY 是單檔查詢端點，沒有官方的「依日期查全市場」
     版本可用，全市場要補齊只能一檔一檔打。股票跟股票之間、同一檔股票的月份
-    請求之間都刻意加了小延遲，每 batch_size 檔再多休息一段更長的時間，避免
-    瞬間對 TWSE 送出大量請求。
+    請求之間都刻意加了延遲，每 batch_size 檔再多休息一段更長的時間，避免對
+    TWSE 送出太密集的請求（先前實測過瞬間量太大會被回 428 限流）。
+
+    每次執行最多只處理 max_per_run 檔，不是把 targets 全部做完——targets
+    可能有上千檔，就算有節流，一次執行也可能長達數小時，乾脆限制單次執行的
+    份量，讓它自然分散到很多天，而不是仰賴中途被限流才被迫中斷。
 
     只挑「本地資料明顯不足」的股票補（daily_bars 少於 DAILY_BAR_MIN_BARS 筆），
-    已經補過的下次執行會自動跳過，執行時間會隨著資料逐日累積越來越短，最終
-    穩定在只處理新上市或前一天回補失敗的少數幾檔。
+    已經補過的下次執行會自動跳過，全市場回補完成前每天都會處理到不同的股票。
 
     如果還是被 TWSE 限流（RateLimitedError），立刻整批中止、不再繼續打——
     剩下沒補到的股票下次執行（明天的排程，或下次重啟）會因為還是「資料不足」
@@ -207,12 +212,17 @@ async def backfill_all_twse_daily_bars(
         .group_by(DailyBar.stock_code)
         .all()
     )
-    targets = [code for code in twse_codes if bar_counts.get(code, 0) < DAILY_BAR_MIN_BARS]
-    if not targets:
+    all_targets = [code for code in twse_codes if bar_counts.get(code, 0) < DAILY_BAR_MIN_BARS]
+    if not all_targets:
         logger.info("backfill_all_twse_daily_bars: 全部上市股票資料都已足夠，略過")
         return 0
 
-    logger.info("backfill_all_twse_daily_bars: 需要回補 %d 檔上市股票（分批進行）", len(targets))
+    targets = all_targets[:max_per_run]
+    logger.info(
+        "backfill_all_twse_daily_bars: 全部還需要回補 %d 檔上市股票，本次處理前 %d 檔",
+        len(all_targets),
+        len(targets),
+    )
     total = 0
     processed = 0
     async with httpx.AsyncClient(timeout=15, headers=_HEADERS) as client:
@@ -238,5 +248,52 @@ async def backfill_all_twse_daily_bars(
                 logger.exception("backfill_all_twse_daily_bars: %s 回補失敗", code)
                 processed += 1
 
-    logger.info("backfill_all_twse_daily_bars: 本次處理 %d/%d 檔、寫入 %d 筆日K", processed, len(targets), total)
+    logger.info(
+        "backfill_all_twse_daily_bars: 本次處理 %d/%d 檔、寫入 %d 筆日K（全市場還剩 %d 檔待補）",
+        processed,
+        len(targets),
+        total,
+        len(all_targets) - processed,
+    )
     return total
+
+
+_BAR_COUNT_BUCKETS = [
+    (0, 0, "0"),
+    (1, 9, "1-9"),
+    (10, 39, "10-39"),
+    (40, 59, "40-59"),
+    (60, None, "60+"),
+]
+
+
+def _bucketize_bar_counts(counts: list[int]) -> list[dict]:
+    bucket_counts = {label: 0 for _, _, label in _BAR_COUNT_BUCKETS}
+    for count in counts:
+        for lo, hi, label in _BAR_COUNT_BUCKETS:
+            if count >= lo and (hi is None or count <= hi):
+                bucket_counts[label] += 1
+                break
+    return [{"label": label, "count": bucket_counts[label]} for _, _, label in _BAR_COUNT_BUCKETS]
+
+
+def get_daily_bar_stats(db: Session) -> dict:
+    """給管理後台看的資料完整度統計：每個市場有幾檔股票、日K筆數落在哪個
+    區間、有幾檔已經達到「足夠」（>= DAILY_BAR_MIN_BARS）的門檻。TWSE 的
+    「足夠」通常代表已經被 backfill_all_twse_daily_bars 回補過；TPEx 沒有
+    回補機制，純粹是逐日累積的結果，前端呈現時措辭要分開講。"""
+    stock_markets = dict(db.query(Stock.code, Stock.market).all())
+    bar_counts = dict(db.query(DailyBar.stock_code, func.count(DailyBar.id)).group_by(DailyBar.stock_code).all())
+
+    result = {}
+    for market in (Market.TWSE, Market.TPEX):
+        codes = [code for code, m in stock_markets.items() if m == market]
+        counts = [bar_counts.get(code, 0) for code in codes]
+        sufficient = sum(1 for c in counts if c >= DAILY_BAR_MIN_BARS)
+        result[market.value.lower()] = {
+            "total_stocks": len(codes),
+            "sufficient": sufficient,
+            "insufficient": len(codes) - sufficient,
+            "buckets": _bucketize_bar_counts(counts),
+        }
+    return result

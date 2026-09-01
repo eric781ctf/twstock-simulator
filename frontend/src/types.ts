@@ -96,6 +96,29 @@ export interface AdminAccount {
   created_at: string;
 }
 
+export interface DailyBarBucket {
+  label: string;
+  count: number;
+}
+
+export interface DailyBarMarketStats {
+  total_stocks: number;
+  sufficient: number;
+  insufficient: number;
+  buckets: DailyBarBucket[];
+}
+
+export interface DailyBarStats {
+  twse: DailyBarMarketStats;
+  tpex: DailyBarMarketStats;
+}
+
+export interface FeatureFlag {
+  key: string;
+  label: string;
+  enabled: boolean;
+}
+
 export interface LeaderboardEntry {
   nickname: string;
   total_assets: number;

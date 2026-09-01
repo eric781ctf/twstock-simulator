@@ -11,6 +11,7 @@ from app.routers import (
     account,
     admin,
     auth,
+    feature_flags,
     leaderboard,
     market_data,
     market_session,
@@ -23,6 +24,7 @@ from app.routers import (
 )
 from app.services.admin import ensure_admin_user
 from app.services.app_config import ensure_app_config
+from app.services.feature_flags import SCHEDULER_DAILY_BAR_BACKFILL, ensure_feature_flags, is_enabled
 from app.services.migrations import run_lightweight_migrations
 from app.services.scheduler import start_scheduler, stop_scheduler
 from app.services.stock_sync import backfill_all_twse_daily_bars, backfill_valuation_history, sync_stocks, sync_valuations
@@ -48,7 +50,10 @@ async def _backfill_daily_bars_task() -> None:
     「資料夠了就跳過」的判斷，兩邊各自觸發不會重複做工）。"""
     db = SessionLocal()
     try:
-        await backfill_all_twse_daily_bars(db)
+        if is_enabled(db, SCHEDULER_DAILY_BAR_BACKFILL):
+            await backfill_all_twse_daily_bars(db)
+        else:
+            logger.info("backfill_all_twse_daily_bars: 功能已被管理員關閉，略過")
     except Exception:
         logger.exception("backfill_all_twse_daily_bars 背景任務發生錯誤")
     finally:
@@ -64,6 +69,7 @@ async def lifespan(app: FastAPI):
     try:
         ensure_app_config(db)
         ensure_admin_user(db)
+        ensure_feature_flags(db)
         count = await sync_stocks(db)
         if count == 0:
             logger.warning("啟動時股票清單同步失敗或無資料，將於背景排程重試")
@@ -102,6 +108,7 @@ app.include_router(leaderboard.router)
 app.include_router(market_session.router)
 app.include_router(strategies.router)
 app.include_router(admin.router)
+app.include_router(feature_flags.router)
 
 
 @app.get("/health")
