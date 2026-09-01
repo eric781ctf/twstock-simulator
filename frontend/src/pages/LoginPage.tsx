@@ -27,7 +27,7 @@ export default function LoginPage() {
   return (
     <div className="auth-page">
       <form className="auth-card page-transition" onSubmit={handleSubmit}>
-        <h1>台股零股模擬交易</h1>
+        <h1>台股模擬交易系統</h1>
         <p className="auth-subtitle">登入你的模擬帳戶</p>
         <input placeholder="帳號" value={username} onChange={(e) => setUsername(e.target.value)} autoFocus />
         <input
