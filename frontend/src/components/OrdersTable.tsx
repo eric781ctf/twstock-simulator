@@ -1,11 +1,17 @@
 import { api } from "../api";
-import type { Order } from "../types";
+import type { Order, OrderType } from "../types";
 
 const STATUS_LABEL: Record<Order["status"], string> = {
   pending: "待成交",
   filled: "已成交",
   cancelled: "已取消",
   expired: "已失效",
+};
+
+const ORDER_TYPE_LABEL: Record<OrderType, string> = {
+  limit: "限價",
+  market: "市價",
+  stop: "停損",
 };
 
 interface Props {
@@ -52,7 +58,8 @@ export function OrdersTable({
           <tr>
             <th>股票</th>
             <th>方向</th>
-            <th>限價</th>
+            <th>類型</th>
+            <th>價格{/* 限價=限價；停損=觸發價；市價=送出當下市價 */}</th>
             <th>股數</th>
             <th>狀態</th>
             <th>成交價</th>
@@ -67,7 +74,8 @@ export function OrdersTable({
               <tr key={o.id}>
                 <td style={{ textAlign: "left" }}>{o.stock_code}</td>
                 <td className={o.side === "buy" ? "buy-text" : "sell-text"}>{o.side === "buy" ? "買" : "賣"}</td>
-                <td>{o.price.toFixed(2)}</td>
+                <td>{ORDER_TYPE_LABEL[o.order_type]}</td>
+                <td>{o.order_type === "market" ? "-" : (o.order_type === "stop" ? o.stop_price ?? o.price : o.price).toFixed(2)}</td>
                 <td>{o.quantity}</td>
                 <td className={`status-${o.status}`}>{STATUS_LABEL[o.status]}</td>
                 <td>{o.filled_price != null ? o.filled_price.toFixed(2) : "-"}</td>

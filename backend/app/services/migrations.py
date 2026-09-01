@@ -17,4 +17,7 @@ def run_lightweight_migrations(engine: Engine) -> None:
         conn.execute(text("ALTER TABLE users ALTER COLUMN nickname SET NOT NULL"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS frozen_until TIMESTAMPTZ"))
+        conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_type VARCHAR(10) NOT NULL DEFAULT 'limit'"))
+        conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS stop_price NUMERIC(18, 4)"))
+        conn.execute(text("ALTER TABLE trades ADD COLUMN IF NOT EXISTS realized_pnl NUMERIC(18, 4)"))
     logger.info("run_lightweight_migrations 完成")

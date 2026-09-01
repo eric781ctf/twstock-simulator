@@ -113,7 +113,9 @@ class Order(Base):
     account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), nullable=False)
     stock_code: Mapped[str] = mapped_column(ForeignKey("stocks.code"), nullable=False)
     side: Mapped[Side] = mapped_column(Enum(Side), nullable=False)
+    order_type: Mapped[str] = mapped_column(String(10), nullable=False, default="limit")
     price: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False)
+    stop_price: Mapped[float | None] = mapped_column(Numeric(18, 4), nullable=True)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[OrderStatus] = mapped_column(Enum(OrderStatus), nullable=False, default=OrderStatus.PENDING)
     reserved_amount: Mapped[float | None] = mapped_column(Numeric(18, 4), nullable=True)
@@ -137,6 +139,7 @@ class Trade(Base):
     amount: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False)
     fee: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False)
     tax: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False, default=0)
+    realized_pnl: Mapped[float | None] = mapped_column(Numeric(18, 4), nullable=True)
     executed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     stock: Mapped["Stock"] = relationship()

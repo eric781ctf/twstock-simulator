@@ -22,7 +22,9 @@ async def place_order(
         raise HTTPException(status_code=404, detail="股票代碼不存在")
 
     try:
-        order = await create_order(db, account, stock, payload.side, payload.price, payload.quantity)
+        order = await create_order(
+            db, account, stock, payload.side, payload.order_type, payload.price, payload.stop_price, payload.quantity
+        )
     except OrderValidationError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return order

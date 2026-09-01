@@ -12,9 +12,11 @@ import type {
   Order,
   OrderSide,
   OrderStatus,
+  OrderType,
   Position,
   PricePoint,
   Quote,
+  RealizedPnlSummary,
   Stock,
   Strategy,
   StrategyInput,
@@ -87,9 +89,16 @@ export const api = {
     const qs = q.toString();
     return request<Trade[]>(`/trades${qs ? `?${qs}` : ""}`);
   },
-  placeOrder: (payload: { stock_code: string; side: OrderSide; price: number; quantity: number }) =>
-    request<Order>("/orders", { method: "POST", body: JSON.stringify(payload) }),
+  placeOrder: (payload: {
+    stock_code: string;
+    side: OrderSide;
+    order_type: OrderType;
+    price?: number;
+    stop_price?: number;
+    quantity: number;
+  }) => request<Order>("/orders", { method: "POST", body: JSON.stringify(payload) }),
   cancelOrder: (id: number) => request<Order>(`/orders/${id}`, { method: "DELETE" }),
+  getRealizedPnlSummary: () => request<RealizedPnlSummary>("/trades/realized-pnl-summary"),
 
   getWatchlist: () => request<WatchlistItem[]>("/watchlist"),
   addToWatchlist: (stock_code: string) =>

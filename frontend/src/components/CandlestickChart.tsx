@@ -1,4 +1,11 @@
-import { createChart, type CandlestickData, type IChartApi, type ISeriesApi, type LineData } from "lightweight-charts";
+import {
+  createChart,
+  type CandlestickData,
+  type HistogramData,
+  type IChartApi,
+  type ISeriesApi,
+  type LineData,
+} from "lightweight-charts";
 import { useEffect, useRef } from "react";
 import { computeMA } from "../lib/ma";
 import type { DailyBar } from "../types";
@@ -16,6 +23,7 @@ export function CandlestickChart({ bars, height = 220 }: { bars: DailyBar[]; hei
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const maSeriesRef = useRef<ISeriesApi<"Line">[]>([]);
+  const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
 
   // 建立一次圖表 + 監聽「重設所有圖表時間區間」事件，資料更新不會重建圖表，
   // 使用者手動縮放/拖曳的視窗範圍才不會每次背景刷新就被打回原狀。
@@ -28,7 +36,7 @@ export function CandlestickChart({ bars, height = 220 }: { bars: DailyBar[]; hei
       height,
       layout: { background: { color: "transparent" }, textColor: "#7688a8", fontSize: 11 },
       grid: { vertLines: { color: "rgba(255,255,255,0.04)" }, horzLines: { color: "rgba(255,255,255,0.04)" } },
-      rightPriceScale: { borderColor: "#202a42" },
+      rightPriceScale: { borderColor: "#202a42", scaleMargins: { top: 0.05, bottom: 0.24 } },
       timeScale: { borderColor: "#202a42" },
     });
     chartRef.current = chart;
@@ -41,6 +49,14 @@ export function CandlestickChart({ bars, height = 220 }: { bars: DailyBar[]; hei
       wickUpColor: "#ff4f7e",
       wickDownColor: "#2be3ae",
     });
+
+    volumeSeriesRef.current = chart.addHistogramSeries({
+      priceFormat: { type: "volume" },
+      priceScaleId: "volume",
+      lastValueVisible: false,
+      priceLineVisible: false,
+    });
+    chart.priceScale("volume").applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
 
     maSeriesRef.current = MA_LINES.map((ma) =>
       chart.addLineSeries({
@@ -69,6 +85,7 @@ export function CandlestickChart({ bars, height = 220 }: { bars: DailyBar[]; hei
       chartRef.current = null;
       seriesRef.current = null;
       maSeriesRef.current = [];
+      volumeSeriesRef.current = null;
     };
   }, []);
 
@@ -83,6 +100,13 @@ export function CandlestickChart({ bars, height = 220 }: { bars: DailyBar[]; hei
     }));
     const hadNoData = seriesRef.current.data().length === 0;
     seriesRef.current.setData(data);
+
+    const volumeData: HistogramData[] = bars.map((b) => ({
+      time: b.trade_date,
+      value: b.volume,
+      color: b.close >= b.open ? "rgba(255,79,126,0.5)" : "rgba(43,227,174,0.5)",
+    }));
+    volumeSeriesRef.current?.setData(volumeData);
 
     MA_LINES.forEach((ma, i) => {
       const maData: LineData[] = computeMA(bars, ma.period).map((p) => ({ time: p.time, value: p.value }));

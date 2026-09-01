@@ -23,7 +23,6 @@ from app.services.feature_flags import STRATEGY, is_enabled
 from app.services.indicators import compute_rank_value
 from app.services.matching import TAIPEI_TZ, OrderValidationError, create_order, is_after_hours_window, is_trading_hours
 from app.services.strategy_conditions import evaluate_all
-from app.services.twse_client import fetch_quotes
 
 logger = logging.getLogger(__name__)
 
@@ -43,14 +42,6 @@ def _load_bars_by_code(db: Session) -> dict[str, list[DailyBar]]:
     for row in rows:
         by_code.setdefault(row.stock_code, []).append(row)
     return by_code
-
-
-async def _get_live_price(stock: Stock, bars: list[DailyBar]) -> float:
-    quotes = await fetch_quotes([(stock.code, stock.market.value)])
-    quote = quotes.get(stock.code)
-    if quote and quote["price"] is not None:
-        return quote["price"]
-    return bars[-1].close
 
 
 def _already_traded_today(db: Session, strategy_id: int, stock_code: str, side: Side, today: date) -> bool:
@@ -88,9 +79,8 @@ async def _run_sell_pass(db: Session, strategy: Strategy, account: Account, bars
         if available_qty <= 0:
             continue
         sell_qty = min(strategy.quantity, available_qty)
-        price = await _get_live_price(stock, bars)
         try:
-            order = await create_order(db, account, stock, Side.SELL, price, sell_qty)
+            order = await create_order(db, account, stock, Side.SELL, "market", None, None, sell_qty)
             _log_strategy_trade(db, strategy.id, position.stock_code, Side.SELL, today, order.id)
             logger.info("策略 %s 自動賣出 %s x%d", strategy.name, position.stock_code, sell_qty)
         except OrderValidationError as e:
@@ -126,10 +116,8 @@ async def _run_buy_pass(db: Session, strategy: Strategy, account: Account, bars_
         stock = db.get(Stock, stock_code)
         if not stock:
             continue
-        bars = bars_by_code[stock_code]
-        price = await _get_live_price(stock, bars)
         try:
-            order = await create_order(db, account, stock, Side.BUY, price, strategy.quantity)
+            order = await create_order(db, account, stock, Side.BUY, "market", None, None, strategy.quantity)
             _log_strategy_trade(db, strategy.id, stock_code, Side.BUY, today, order.id)
             logger.info("策略 %s 自動買進 %s x%d", strategy.name, stock_code, strategy.quantity)
         except OrderValidationError as e:
