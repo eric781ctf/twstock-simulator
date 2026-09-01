@@ -1,5 +1,6 @@
 import type {
   Account,
+  AdminAccount,
   AuthResponse,
   DailyBar,
   Fundamentals,
@@ -94,4 +95,17 @@ export const api = {
   getLeaderboard: () => request<LeaderboardEntry[]>("/leaderboard"),
 
   getMarketSession: () => request<MarketSession>("/market/session"),
+
+  getAdminAccounts: () => request<AdminAccount[]>("/admin/accounts"),
+  getDefaultInitialCash: () => request<{ amount: number }>("/admin/settings/default-initial-cash"),
+  setDefaultInitialCash: (amount: number) =>
+    request<{ amount: number }>("/admin/settings/default-initial-cash", {
+      method: "POST",
+      body: JSON.stringify({ amount }),
+    }),
+  addCashToAll: (amount: number) =>
+    request<{ updated: number }>("/admin/accounts/add-cash", { method: "POST", body: JSON.stringify({ amount }) }),
+  deleteAccount: (userId: number) => request<{ deleted: boolean }>(`/admin/accounts/${userId}`, { method: "DELETE" }),
+  freezeAccount: (userId: number) =>
+    request<{ frozen_until: string }>(`/admin/accounts/${userId}/freeze`, { method: "POST" }),
 };

@@ -15,4 +15,6 @@ def run_lightweight_migrations(engine: Engine) -> None:
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS nickname VARCHAR(50)"))
         conn.execute(text("UPDATE users SET nickname = username WHERE nickname IS NULL"))
         conn.execute(text("ALTER TABLE users ALTER COLUMN nickname SET NOT NULL"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS frozen_until TIMESTAMPTZ"))
     logger.info("run_lightweight_migrations 完成")
