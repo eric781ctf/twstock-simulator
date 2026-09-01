@@ -112,9 +112,13 @@ export default function AdminPage() {
   }
 
   async function handleToggleFlag(flag: FeatureFlag) {
-    setFeatureFlags((prev) => prev.map((f) => (f.key === flag.key ? { ...f, enabled: !f.enabled } : f)));
+    const next = !flag.enabled;
+    const action = next ? "開啟" : "關閉";
+    if (!window.confirm(`確定要${action}「${flag.label}」嗎？`)) return;
+
+    setFeatureFlags((prev) => prev.map((f) => (f.key === flag.key ? { ...f, enabled: next } : f)));
     try {
-      await api.setFeatureFlag(flag.key, !flag.enabled);
+      await api.setFeatureFlag(flag.key, next);
     } catch (err) {
       alert(err instanceof Error ? err.message : "切換失敗");
       await refreshFeatureFlags();
