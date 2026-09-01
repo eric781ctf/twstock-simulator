@@ -1,9 +1,13 @@
+import asyncio
 import logging
 from datetime import date, timedelta
 
+import httpx
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models import DailyBar, Market, Stock, StockValuationHistory
+from app.services.history import backfill_twse_history
 from app.services.twse_client import (
     fetch_listed_stocks,
     fetch_otc_stocks,
@@ -14,6 +18,11 @@ from app.services.twse_client import (
 logger = logging.getLogger(__name__)
 
 VALUATION_BACKFILL_MONTHS = 36
+DAILY_BAR_BACKFILL_MONTHS = 3
+DAILY_BAR_MIN_BARS = 40  # 一季約 60 個交易日，抓「明顯不足」的門檻不用抓到剛好
+DAILY_BAR_BATCH_SIZE = 20
+DAILY_BAR_BATCH_DELAY_SECONDS = 3.0
+_HEADERS = {"User-Agent": "Mozilla/5.0 (twstock-simulator)"}
 
 
 async def sync_stocks(db: Session) -> int:
@@ -162,4 +171,52 @@ async def backfill_valuation_history(db: Session, months: int = VALUATION_BACKFI
 
     db.commit()
     logger.info("backfill_valuation_history: 回補完成，共寫入 %d 筆快照", total)
+    return total
+
+
+async def backfill_all_twse_daily_bars(
+    db: Session,
+    months: int = DAILY_BAR_BACKFILL_MONTHS,
+    batch_size: int = DAILY_BAR_BATCH_SIZE,
+    delay_seconds: float = DAILY_BAR_BATCH_DELAY_SECONDS,
+) -> int:
+    """幫「所有」上市股票回補約 months 個月的日 K 線，不像 sync_stocks 每天只拿
+    今天一筆——TWSE 的 STOCK_DAY 是單檔查詢端點，沒有官方的「依日期查全市場」
+    版本可用，全市場要補齊只能一檔一檔打。分批（batch_size 檔一組）、批次間
+    休息 delay_seconds 秒，避免瞬間對 TWSE 送出上千個請求。
+
+    只挑「本地資料明顯不足」的股票補（daily_bars 少於 DAILY_BAR_MIN_BARS 筆），
+    已經補過的下次執行會自動跳過，執行時間會隨著資料逐日累積越來越短，最終
+    穩定在只處理新上市或前一天回補失敗的少數幾檔。"""
+    cutoff = date.today() - timedelta(days=months * 31 + 10)
+
+    twse_codes = [c for (c,) in db.query(Stock.code).filter(Stock.market == Market.TWSE).all()]
+    if not twse_codes:
+        return 0
+
+    bar_counts = dict(
+        db.query(DailyBar.stock_code, func.count(DailyBar.id))
+        .filter(DailyBar.stock_code.in_(twse_codes), DailyBar.trade_date >= cutoff)
+        .group_by(DailyBar.stock_code)
+        .all()
+    )
+    targets = [code for code in twse_codes if bar_counts.get(code, 0) < DAILY_BAR_MIN_BARS]
+    if not targets:
+        logger.info("backfill_all_twse_daily_bars: 全部上市股票資料都已足夠，略過")
+        return 0
+
+    logger.info("backfill_all_twse_daily_bars: 需要回補 %d 檔上市股票（分批進行）", len(targets))
+    total = 0
+    async with httpx.AsyncClient(timeout=15, headers=_HEADERS) as client:
+        for i in range(0, len(targets), batch_size):
+            batch = targets[i : i + batch_size]
+            for code in batch:
+                try:
+                    total += await backfill_twse_history(db, code, months, client=client)
+                except Exception:
+                    logger.exception("backfill_all_twse_daily_bars: %s 回補失敗", code)
+            if i + batch_size < len(targets):
+                await asyncio.sleep(delay_seconds)
+
+    logger.info("backfill_all_twse_daily_bars: 回補完成，處理 %d 檔、寫入 %d 筆日K", len(targets), total)
     return total

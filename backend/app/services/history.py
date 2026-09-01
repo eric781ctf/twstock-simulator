@@ -64,11 +64,17 @@ def upsert_daily_bar(db: Session, stock_code: str, trade_date: date, o, h, l, c,
         db.add(DailyBar(stock_code=stock_code, trade_date=trade_date, open=o, high=h, low=l, close=c, volume=v))
 
 
-async def backfill_twse_history(db: Session, stock_code: str, months: int = 3) -> int:
-    """向 TWSE 官方歷史 API 回補過去 N 個月的日 K，僅適用上市股票。"""
+async def backfill_twse_history(db: Session, stock_code: str, months: int = 3, client: httpx.AsyncClient | None = None) -> int:
+    """向 TWSE 官方歷史 API 回補過去 N 個月的日 K，僅適用上市股票。可傳入既有的
+    httpx.AsyncClient 重複使用連線（見 stock_sync.backfill_all_twse_daily_bars
+    對上千檔股票批次呼叫時，重用連線比每檔都重新握手快很多）；不傳的話維持
+    原本「自己開一個」的行為，給單檔查詢的呼叫端（get_daily_history）用。"""
     today = date.today()
     count = 0
-    async with httpx.AsyncClient(timeout=15, headers=_HEADERS) as client:
+    owns_client = client is None
+    if owns_client:
+        client = httpx.AsyncClient(timeout=15, headers=_HEADERS)
+    try:
         for i in range(months):
             year = today.year
             month = today.month - i
@@ -96,6 +102,9 @@ async def backfill_twse_history(db: Session, stock_code: str, months: int = 3) -
                 vol = to_int(row[1])
                 upsert_daily_bar(db, stock_code, trade_date, o, h, l, c, vol)
                 count += 1
+    finally:
+        if owns_client:
+            await client.aclose()
     if count:
         db.commit()
     return count
