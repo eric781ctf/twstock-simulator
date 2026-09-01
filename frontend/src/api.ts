@@ -3,6 +3,8 @@ import type {
   AdminAccount,
   AuthResponse,
   DailyBar,
+  DailyBarStats,
+  FeatureFlag,
   Fundamentals,
   FundamentalsHistoryPoint,
   LeaderboardEntry,
@@ -121,4 +123,10 @@ export const api = {
   activateStrategy: (id: number) => request<Strategy>(`/strategies/${id}/activate`, { method: "POST" }),
   deactivateStrategy: (id: number) => request<Strategy>(`/strategies/${id}/deactivate`, { method: "POST" }),
   getStrategyTrades: (id: number) => request<StrategyTradeRecord[]>(`/strategies/${id}/trades`),
+
+  getFeatureFlags: () => request<Record<string, boolean>>("/feature-flags"),
+  getAdminFeatureFlags: () => request<FeatureFlag[]>("/admin/feature-flags"),
+  setFeatureFlag: (key: string, enabled: boolean) =>
+    request<FeatureFlag>(`/admin/feature-flags/${key}`, { method: "POST", body: JSON.stringify({ enabled }) }),
+  getDailyBarStats: () => request<DailyBarStats>("/admin/daily-bar-stats"),
 };

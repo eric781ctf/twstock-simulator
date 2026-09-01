@@ -106,6 +106,33 @@ class DefaultInitialCashOut(BaseModel):
     amount: float
 
 
+class DailyBarBucketOut(BaseModel):
+    label: str
+    count: int
+
+
+class DailyBarMarketStatsOut(BaseModel):
+    total_stocks: int
+    sufficient: int
+    insufficient: int
+    buckets: list[DailyBarBucketOut]
+
+
+class DailyBarStatsOut(BaseModel):
+    twse: DailyBarMarketStatsOut
+    tpex: DailyBarMarketStatsOut
+
+
+class FeatureFlagOut(BaseModel):
+    key: str
+    label: str
+    enabled: bool
+
+
+class FeatureFlagUpdateIn(BaseModel):
+    enabled: bool
+
+
 class MarketSessionOut(BaseModel):
     status: Literal["trading", "after_hours", "closed"]
     trading_start: str

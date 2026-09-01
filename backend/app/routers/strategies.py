@@ -5,10 +5,17 @@ from app.database import get_db
 from app.models import Order, Strategy, StrategyTrade, User
 from app.schemas import StrategyCreate, StrategyOut, StrategyTradeOut
 from app.services.auth import get_current_user
+from app.services.feature_flags import STRATEGY, is_enabled
 from app.services.matching import get_account_for_user
 from app.services.strategy_conditions import ConditionValidationError, validate_conditions
 
-router = APIRouter(prefix="/strategies", tags=["strategies"])
+
+def require_strategy_enabled(db: Session = Depends(get_db)) -> None:
+    if not is_enabled(db, STRATEGY):
+        raise HTTPException(status_code=503, detail="策略功能維護中")
+
+
+router = APIRouter(prefix="/strategies", tags=["strategies"], dependencies=[Depends(require_strategy_enabled)])
 
 
 def _validate_payload(payload: StrategyCreate) -> None:

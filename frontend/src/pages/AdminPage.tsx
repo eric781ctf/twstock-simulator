@@ -2,8 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { api } from "../api";
 import { AmountInput } from "../components/AmountInput";
+import { BarChart } from "../components/BarChart";
 import { useAuth } from "../auth/AuthContext";
-import type { AdminAccount } from "../types";
+import type { AdminAccount, DailyBarStats, FeatureFlag } from "../types";
 
 export default function AdminPage() {
   const { isAdmin } = useAuth();
@@ -14,6 +15,8 @@ export default function AdminPage() {
   const [addAmount, setAddAmount] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [dailyBarStats, setDailyBarStats] = useState<DailyBarStats | null>(null);
+  const [featureFlags, setFeatureFlags] = useState<FeatureFlag[]>([]);
 
   const refresh = useCallback(async () => {
     const res = await api.getAdminAccounts();
@@ -26,11 +29,23 @@ export default function AdminPage() {
     setDefaultInitialCashState(res.amount);
   }, []);
 
+  const refreshDailyBarStats = useCallback(async () => {
+    const res = await api.getDailyBarStats();
+    setDailyBarStats(res);
+  }, []);
+
+  const refreshFeatureFlags = useCallback(async () => {
+    const res = await api.getAdminFeatureFlags();
+    setFeatureFlags(res);
+  }, []);
+
   useEffect(() => {
     if (!isAdmin) return;
     refresh();
     refreshDefaultCash();
-  }, [isAdmin, refresh, refreshDefaultCash]);
+    refreshDailyBarStats();
+    refreshFeatureFlags();
+  }, [isAdmin, refresh, refreshDefaultCash, refreshDailyBarStats, refreshFeatureFlags]);
 
   if (!isAdmin) {
     return <Navigate to="/" replace />;
@@ -96,6 +111,16 @@ export default function AdminPage() {
     }
   }
 
+  async function handleToggleFlag(flag: FeatureFlag) {
+    setFeatureFlags((prev) => prev.map((f) => (f.key === flag.key ? { ...f, enabled: !f.enabled } : f)));
+    try {
+      await api.setFeatureFlag(flag.key, !flag.enabled);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "切換失敗");
+      await refreshFeatureFlags();
+    }
+  }
+
   return (
     <>
       <h2 className="section-title">管理後台</h2>
@@ -131,6 +156,89 @@ export default function AdminPage() {
       </div>
 
       {error && <div className="error-msg">{error}</div>}
+
+      <div className="stats-section">
+        <div className="panel">
+          <h2>上市（TWSE）日K資料完整度</h2>
+          {dailyBarStats ? (
+            <>
+              <div className="stats-summary-row">
+                <div className="stat">
+                  <span className="label">股票總數</span>
+                  <span className="value">{dailyBarStats.twse.total_stocks.toLocaleString()}</span>
+                </div>
+                <div className="stat">
+                  <span className="label">已回補</span>
+                  <span className="value" style={{ color: "var(--sell)" }}>
+                    {dailyBarStats.twse.sufficient.toLocaleString()}
+                  </span>
+                </div>
+                <div className="stat">
+                  <span className="label">未回補</span>
+                  <span className="value" style={{ color: "var(--buy)" }}>
+                    {dailyBarStats.twse.insufficient.toLocaleString()}
+                  </span>
+                </div>
+              </div>
+              <p className="order-hint">依「目前累積的日K筆數」分布，40 筆以上視為已回補足夠資料</p>
+              <BarChart buckets={dailyBarStats.twse.buckets} />
+            </>
+          ) : (
+            <div className="empty-hint">載入中...</div>
+          )}
+        </div>
+
+        <div className="panel">
+          <h2>上櫃（TPEx）日K資料完整度</h2>
+          {dailyBarStats ? (
+            <>
+              <div className="stats-summary-row">
+                <div className="stat">
+                  <span className="label">股票總數</span>
+                  <span className="value">{dailyBarStats.tpex.total_stocks.toLocaleString()}</span>
+                </div>
+                <div className="stat">
+                  <span className="label">已累積足夠</span>
+                  <span className="value" style={{ color: "var(--sell)" }}>
+                    {dailyBarStats.tpex.sufficient.toLocaleString()}
+                  </span>
+                </div>
+                <div className="stat">
+                  <span className="label">尚未足夠</span>
+                  <span className="value" style={{ color: "var(--buy)" }}>
+                    {dailyBarStats.tpex.insufficient.toLocaleString()}
+                  </span>
+                </div>
+              </div>
+              <p className="order-hint">上櫃沒有官方回補端點，只能逐日累積，數字只會越來越多</p>
+              <BarChart buckets={dailyBarStats.tpex.buckets} />
+            </>
+          ) : (
+            <div className="empty-hint">載入中...</div>
+          )}
+        </div>
+      </div>
+
+      <div className="panel">
+        <h2>功能開關</h2>
+        <p className="order-hint">關閉的功能會立即停用，不需要重新部署</p>
+        {featureFlags.length === 0 ? (
+          <div className="empty-hint">載入中...</div>
+        ) : (
+          featureFlags.map((flag) => (
+            <div className="feature-flag-row" key={flag.key}>
+              <span className="feature-flag-name">
+                {flag.label}
+                <span className="feature-flag-key">{flag.key}</span>
+              </span>
+              <label className="toggle-switch">
+                <input type="checkbox" checked={flag.enabled} onChange={() => handleToggleFlag(flag)} />
+                <span className="toggle-switch-slider" />
+              </label>
+            </div>
+          ))
+        )}
+      </div>
 
       <div className="panel">
         <h2>所有帳戶</h2>

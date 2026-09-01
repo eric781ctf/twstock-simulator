@@ -19,6 +19,7 @@ from datetime import date, datetime, timedelta
 from sqlalchemy.orm import Session
 
 from app.models import Account, DailyBar, Position, Side, Stock, Strategy, StrategyTrade
+from app.services.feature_flags import STRATEGY, is_enabled
 from app.services.indicators import compute_rank_value
 from app.services.matching import TAIPEI_TZ, OrderValidationError, create_order, is_after_hours_window, is_trading_hours
 from app.services.strategy_conditions import evaluate_all
@@ -136,6 +137,8 @@ async def _run_buy_pass(db: Session, strategy: Strategy, account: Account, bars_
 
 
 async def run_strategy_cycle(db: Session) -> None:
+    if not is_enabled(db, STRATEGY):
+        return
     if not (is_trading_hours() or is_after_hours_window()):
         return
 

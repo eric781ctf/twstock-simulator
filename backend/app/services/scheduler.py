@@ -4,6 +4,13 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from app.config import settings
 from app.database import SessionLocal
+from app.services.feature_flags import (
+    SCHEDULER_DAILY_BAR_BACKFILL,
+    SCHEDULER_DAILY_STOCK_SYNC,
+    SCHEDULER_MATCHING_POLL,
+    SCHEDULER_STRATEGY_POLL,
+    is_enabled,
+)
 from app.services.matching import (
     TAIPEI_TZ,
     expire_stale_orders,
@@ -22,6 +29,8 @@ scheduler = AsyncIOScheduler(timezone=TAIPEI_TZ)
 async def _poll_job() -> None:
     db = SessionLocal()
     try:
+        if not is_enabled(db, SCHEDULER_MATCHING_POLL):
+            return
         expire_stale_orders(db)
         if is_trading_hours():
             await run_matching_cycle(db)
@@ -34,6 +43,8 @@ async def _poll_job() -> None:
 async def _strategy_poll_job() -> None:
     db = SessionLocal()
     try:
+        if not is_enabled(db, SCHEDULER_STRATEGY_POLL):
+            return
         await run_strategy_cycle(db)
     except Exception:
         logger.exception("策略輪詢發生錯誤")
@@ -44,6 +55,8 @@ async def _strategy_poll_job() -> None:
 async def _daily_stock_sync_job() -> None:
     db = SessionLocal()
     try:
+        if not is_enabled(db, SCHEDULER_DAILY_STOCK_SYNC):
+            return
         prune_old_price_points(db)
         await sync_stocks(db)
     except Exception:
@@ -55,6 +68,8 @@ async def _daily_stock_sync_job() -> None:
 async def _daily_bar_backfill_job() -> None:
     db = SessionLocal()
     try:
+        if not is_enabled(db, SCHEDULER_DAILY_BAR_BACKFILL):
+            return
         await backfill_all_twse_daily_bars(db)
     except Exception:
         logger.exception("每日日K回補發生錯誤")
