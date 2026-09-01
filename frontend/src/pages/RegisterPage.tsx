@@ -42,7 +42,7 @@ export default function RegisterPage() {
   return (
     <div className="auth-page">
       <form className="auth-card page-transition" onSubmit={handleSubmit}>
-        <h1>台股零股模擬交易</h1>
+        <h1>台股模擬交易系統</h1>
         <p className="auth-subtitle">建立新帳戶，起始資金 1,000,000 元</p>
         <input placeholder="帳號 (至少 3 字元)" value={username} onChange={(e) => setUsername(e.target.value)} autoFocus />
         <input placeholder="暱稱 (顯示於排行榜)" value={nickname} onChange={(e) => setNickname(e.target.value)} />

@@ -46,7 +46,7 @@ export function Layout() {
   return (
     <>
       <header className="app-header">
-        <h1>台股零股模擬交易</h1>
+        <h1>台股模擬交易系統</h1>
       </header>
       <nav className="navbar">
         <div className="nav-links">
