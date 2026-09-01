@@ -120,6 +120,42 @@ class LeaderboardEntryOut(BaseModel):
     market_value: float
 
 
+class StrategyCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=50)
+    quantity: int = Field(gt=0, lt=1000)
+    buy_conditions: list[dict] = Field(default_factory=list)
+    sell_conditions: list[dict] = Field(default_factory=list)
+    rank_by: Literal["change_percent", "k_value", "d_value", "volume"] = "change_percent"
+    rank_direction: Literal["asc", "desc"] = "desc"
+    top_n: int = Field(gt=0, le=50)
+
+
+class StrategyOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    is_active: bool
+    quantity: int
+    buy_conditions: list[dict]
+    sell_conditions: list[dict]
+    rank_by: str
+    rank_direction: str
+    top_n: int
+    created_at: datetime
+
+
+class StrategyTradeOut(BaseModel):
+    id: int
+    stock_code: str
+    stock_name: str
+    side: Side
+    trade_date: str
+    price: float | None
+    quantity: int | None
+    status: OrderStatus | None
+
+
 class TradeOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

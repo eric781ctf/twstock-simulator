@@ -133,3 +133,83 @@ export interface WatchlistItem {
   created_at: string;
   current_price: number | null;
 }
+
+export type NumericOperator = "gt" | "lt" | "gte" | "lte";
+export type CrossDirection = "golden" | "death";
+export type MaPeriod = 5 | 20 | 60;
+
+export interface KdValueCondition {
+  type: "kd_value";
+  line: "k" | "d";
+  operator: NumericOperator;
+  value: number;
+}
+
+export interface KdCrossCondition {
+  type: "kd_cross";
+  direction: CrossDirection;
+}
+
+export interface MaCompareCondition {
+  type: "ma_compare";
+  fast: MaPeriod;
+  slow: MaPeriod;
+  operator: "gt" | "lt";
+}
+
+export interface PriceVsMaCondition {
+  type: "price_vs_ma";
+  period: MaPeriod;
+  operator: "gt" | "lt";
+}
+
+export interface StreakCondition {
+  type: "streak";
+  direction: "up" | "down";
+  days: number;
+}
+
+export interface CumulativeChangeCondition {
+  type: "cumulative_change";
+  days: number;
+  operator: "gte" | "lte";
+  percent: number;
+}
+
+export type Condition =
+  | KdValueCondition
+  | KdCrossCondition
+  | MaCompareCondition
+  | PriceVsMaCondition
+  | StreakCondition
+  | CumulativeChangeCondition;
+
+export type RankBy = "change_percent" | "k_value" | "d_value" | "volume";
+export type RankDirection = "asc" | "desc";
+
+export interface StrategyInput {
+  name: string;
+  quantity: number;
+  buy_conditions: Condition[];
+  sell_conditions: Condition[];
+  rank_by: RankBy;
+  rank_direction: RankDirection;
+  top_n: number;
+}
+
+export interface Strategy extends StrategyInput {
+  id: number;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface StrategyTradeRecord {
+  id: number;
+  stock_code: string;
+  stock_name: string;
+  side: OrderSide;
+  trade_date: string;
+  price: number | null;
+  quantity: number | null;
+  status: OrderStatus | null;
+}

@@ -71,6 +71,9 @@ export function Layout() {
               <NavLink to="/positions" className={({ isActive }) => (isActive ? "active" : "")}>
                 部位
               </NavLink>
+              <NavLink to="/strategy" className={({ isActive }) => (isActive ? "active" : "")}>
+                策略
+              </NavLink>
               <NavLink to="/tutorial" className={({ isActive }) => (isActive ? "active" : "")}>
                 股市教學
               </NavLink>

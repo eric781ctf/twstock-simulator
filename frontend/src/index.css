@@ -439,6 +439,194 @@ tbody tr:hover {
   text-decoration: underline;
 }
 
+.strategy-new-btn {
+  width: auto;
+  padding: 10px 22px;
+  margin-bottom: 20px;
+}
+
+.condition-editor {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  margin-bottom: 14px;
+}
+
+.condition-editor-header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.condition-editor-header h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.condition-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px dashed var(--border);
+}
+
+.condition-row:last-of-type {
+  border-bottom: none;
+}
+
+.condition-row select,
+.condition-row input {
+  width: auto;
+  min-width: 70px;
+  margin-bottom: 0;
+  padding: 7px 10px;
+  font-size: 13px;
+}
+
+.condition-row input[type="number"] {
+  width: 80px;
+}
+
+.condition-static-label {
+  font-size: 13px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.add-condition-btn {
+  border: 1px dashed var(--border-strong);
+  background: transparent;
+  color: var(--accent);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-family: var(--font-ui);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.add-condition-btn:hover {
+  border-color: var(--accent);
+  background: rgba(79, 216, 255, 0.08);
+}
+
+.strategy-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 14px;
+  margin: 6px 0 14px;
+}
+
+.strategy-form-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.strategy-form-grid input,
+.strategy-form-grid select {
+  margin-bottom: 0;
+}
+
+.strategy-form-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.strategy-form-actions .submit {
+  width: auto;
+  padding: 10px 24px;
+}
+
+.cancel-btn {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--muted);
+  border-radius: 8px;
+  padding: 10px 20px;
+  cursor: pointer;
+  font-family: var(--font-ui);
+  transition: all 0.2s ease;
+}
+
+.cancel-btn:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.strategy-card.active {
+  border-color: var(--sell);
+  box-shadow: var(--glow-sell);
+}
+
+.strategy-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.strategy-card-header h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+}
+
+.strategy-active-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--sell);
+  border: 1px solid var(--sell);
+  border-radius: 999px;
+  padding: 2px 10px;
+}
+
+.strategy-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.strategy-toggle-btn {
+  border: 1px solid var(--sell);
+  background: rgba(43, 227, 174, 0.12);
+  color: var(--sell);
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-family: var(--font-ui);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.strategy-toggle-btn.stop {
+  border-color: var(--buy);
+  background: rgba(255, 79, 126, 0.12);
+  color: var(--buy);
+}
+
+.strategy-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+
+.strategy-card-body .label {
+  color: var(--muted);
+  margin-right: 6px;
+}
+
 .danger-link {
   color: var(--buy);
 }
