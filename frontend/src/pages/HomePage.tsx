@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import { AddWatchlistBox } from "../components/AddWatchlistBox";
+import { EquityTrendChart } from "../components/EquityTrendChart";
 import { StockChartBlock } from "../components/StockChartBlock";
 import { WatchlistChartBlock } from "../components/WatchlistChartBlock";
-import type { Account, Position, WatchlistItem } from "../types";
+import type { Account, EquitySnapshot, Position, WatchlistItem } from "../types";
 
 export default function HomePage() {
   const [account, setAccount] = useState<Account | null>(null);
   const [positions, setPositions] = useState<Position[]>([]);
   const [watchlist, setWatchlist] = useState<WatchlistItem[]>([]);
+  const [equityHistory, setEquityHistory] = useState<EquitySnapshot[]>([]);
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
@@ -23,11 +25,25 @@ export default function HomePage() {
     setLoading(false);
   }, []);
 
+  const refreshEquityHistory = useCallback(async () => {
+    try {
+      setEquityHistory(await api.getEquityHistory());
+    } catch {
+      // 績效走勢圖不是核心功能，載入失敗不影響其他區塊，安靜略過即可
+    }
+  }, []);
+
   useEffect(() => {
     refresh();
     const timer = setInterval(refresh, 15000);
     return () => clearInterval(timer);
   }, [refresh]);
+
+  useEffect(() => {
+    refreshEquityHistory();
+    const timer = setInterval(refreshEquityHistory, 60000);
+    return () => clearInterval(timer);
+  }, [refreshEquityHistory]);
 
   async function handleRemove(stockCode: string) {
     try {
@@ -45,6 +61,13 @@ export default function HomePage() {
   const positionsMarketValue = positions.reduce((sum, p) => sum + (p.market_value ?? 0), 0);
   const heldCodes = new Set(positions.map((p) => p.stock_code));
   const watchlistOnly = watchlist.filter((w) => !heldCodes.has(w.stock_code));
+
+  const equityFirst = equityHistory[0];
+  const equityLast = equityHistory[equityHistory.length - 1];
+  const equityReturnPercent =
+    equityFirst && equityFirst.total_assets > 0
+      ? ((equityLast.total_assets - equityFirst.total_assets) / equityFirst.total_assets) * 100
+      : null;
 
   return (
     <>
@@ -64,6 +87,22 @@ export default function HomePage() {
           </div>
         </div>
       )}
+
+      <div className="section-title-row">
+        <h2 className="section-title">績效走勢</h2>
+        {equityReturnPercent != null && (
+          <span className={`equity-return-badge ${equityReturnPercent >= 0 ? "buy-text" : "sell-text"}`}>
+            {equityReturnPercent >= 0 ? "+" : ""}
+            {equityReturnPercent.toFixed(2)}%
+          </span>
+        )}
+      </div>
+      <div className="panel">
+        <EquityTrendChart
+          points={equityHistory.map((s) => ({ date: s.snapshot_date, value: s.total_assets }))}
+          emptyText="績效資料每日排程累積中，稍候再回來看"
+        />
+      </div>
 
       {loading ? (
         <div className="empty-hint">載入中...</div>

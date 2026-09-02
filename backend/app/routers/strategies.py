@@ -3,8 +3,9 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Order, Strategy, StrategyTrade, User
-from app.schemas import StrategyCreate, StrategyOut, StrategyTradeOut
+from app.schemas import BacktestRequest, BacktestResultOut, StrategyCreate, StrategyOut, StrategyTradeOut
 from app.services.auth import get_current_user
+from app.services.backtest import BacktestError, run_backtest
 from app.services.feature_flags import STRATEGY, is_enabled
 from app.services.matching import get_account_for_user
 from app.services.strategy_conditions import ConditionValidationError, validate_conditions
@@ -116,6 +117,22 @@ def deactivate_strategy(strategy_id: int, db: Session = Depends(get_db), current
     db.commit()
     db.refresh(strategy)
     return strategy
+
+
+@router.post("/{strategy_id}/backtest", response_model=BacktestResultOut)
+def backtest_strategy(
+    strategy_id: int,
+    payload: BacktestRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    account = get_account_for_user(db, current_user.id)
+    strategy = _get_owned_strategy(db, account.id, strategy_id)
+    try:
+        result = run_backtest(db, strategy, payload.start_date, payload.end_date, payload.initial_cash)
+    except BacktestError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return result
 
 
 @router.get("/{strategy_id}/trades", response_model=list[StrategyTradeOut])

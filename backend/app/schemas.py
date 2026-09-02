@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -216,3 +216,36 @@ class RealizedPnlSummaryOut(BaseModel):
     win_count: int
     loss_count: int
     win_rate: float | None
+
+
+class EquitySnapshotOut(BaseModel):
+    snapshot_date: str
+    cash_balance: float
+    market_value: float
+    total_assets: float
+
+
+class BacktestRequest(BaseModel):
+    start_date: date
+    end_date: date
+    initial_cash: float = Field(default=1_000_000, gt=0)
+
+
+class EquityCurvePointOut(BaseModel):
+    date: str
+    total_assets: float
+
+
+class BacktestResultOut(BaseModel):
+    start_date: str
+    end_date: str
+    initial_cash: float
+    final_assets: float
+    total_return_percent: float
+    max_drawdown_percent: float
+    trade_count: int
+    win_count: int
+    loss_count: int
+    win_rate: float | None
+    equity_curve: list[EquityCurvePointOut]
+    warning: str | None = None
