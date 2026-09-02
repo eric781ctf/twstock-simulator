@@ -1,7 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import { ConditionEditor } from "../components/ConditionEditor";
-import type { Condition, RankBy, RankDirection, Strategy, StrategyInput, StrategyTradeRecord } from "../types";
+import { EquityTrendChart } from "../components/EquityTrendChart";
+import type { BacktestResult, Condition, RankBy, RankDirection, Strategy, StrategyInput, StrategyTradeRecord } from "../types";
+
+function isoDate(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+const DEFAULT_BACKTEST_FORM = {
+  start_date: isoDate(new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)),
+  end_date: isoDate(new Date()),
+  initial_cash: "1000000",
+};
 
 const RANK_LABEL: Record<RankBy, string> = {
   change_percent: "當日漲跌幅",
@@ -65,6 +76,11 @@ export default function StrategyPage() {
   const [tradesFor, setTradesFor] = useState<number | null>(null);
   const [trades, setTrades] = useState<StrategyTradeRecord[]>([]);
   const [strategyEnabled, setStrategyEnabled] = useState<boolean | null>(null);
+  const [backtestFor, setBacktestFor] = useState<number | null>(null);
+  const [backtestForm, setBacktestForm] = useState(DEFAULT_BACKTEST_FORM);
+  const [backtestResult, setBacktestResult] = useState<BacktestResult | null>(null);
+  const [backtestBusy, setBacktestBusy] = useState(false);
+  const [backtestError, setBacktestError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     const res = await api.getStrategies();
@@ -162,6 +178,44 @@ export default function StrategyPage() {
     const res = await api.getStrategyTrades(strategy.id);
     setTrades(res);
     setTradesFor(strategy.id);
+  }
+
+  function handleToggleBacktest(strategy: Strategy) {
+    if (backtestFor === strategy.id) {
+      setBacktestFor(null);
+      return;
+    }
+    setBacktestFor(strategy.id);
+    setBacktestForm(DEFAULT_BACKTEST_FORM);
+    setBacktestResult(null);
+    setBacktestError(null);
+  }
+
+  async function handleRunBacktest(strategyId: number) {
+    setBacktestError(null);
+    const initialCash = Number(backtestForm.initial_cash);
+    if (!backtestForm.start_date || !backtestForm.end_date) {
+      setBacktestError("請選擇起始與結束日期");
+      return;
+    }
+    if (!initialCash || initialCash <= 0) {
+      setBacktestError("請輸入有效的期初資金");
+      return;
+    }
+    setBacktestBusy(true);
+    try {
+      const result = await api.backtestStrategy(strategyId, {
+        start_date: backtestForm.start_date,
+        end_date: backtestForm.end_date,
+        initial_cash: initialCash,
+      });
+      setBacktestResult(result);
+    } catch (err) {
+      setBacktestResult(null);
+      setBacktestError(err instanceof Error ? err.message : "回測失敗");
+    } finally {
+      setBacktestBusy(false);
+    }
   }
 
   if (strategyEnabled === null) {
@@ -315,6 +369,91 @@ export default function StrategyPage() {
             <span className="cancel-link" onClick={() => handleShowTrades(strategy)}>
               {tradesFor === strategy.id ? "收合成交紀錄" : "查看成交紀錄"}
             </span>
+            {" ｜ "}
+            <span className="cancel-link" onClick={() => handleToggleBacktest(strategy)}>
+              {backtestFor === strategy.id ? "收合回測" : "策略回測"}
+            </span>
+            {backtestFor === strategy.id && (
+              <div className="backtest-panel">
+                <div className="backtest-form-grid">
+                  <label>
+                    起始日期
+                    <input
+                      type="date"
+                      value={backtestForm.start_date}
+                      onChange={(e) => setBacktestForm({ ...backtestForm, start_date: e.target.value })}
+                    />
+                  </label>
+                  <label>
+                    結束日期
+                    <input
+                      type="date"
+                      value={backtestForm.end_date}
+                      onChange={(e) => setBacktestForm({ ...backtestForm, end_date: e.target.value })}
+                    />
+                  </label>
+                  <label>
+                    期初資金
+                    <input
+                      type="number"
+                      min={1}
+                      value={backtestForm.initial_cash}
+                      onChange={(e) => setBacktestForm({ ...backtestForm, initial_cash: e.target.value })}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="submit"
+                    disabled={backtestBusy}
+                    onClick={() => handleRunBacktest(strategy.id)}
+                  >
+                    {backtestBusy ? "回測中..." : "執行回測"}
+                  </button>
+                </div>
+                <p className="empty-hint">
+                  回測只用本地已累積的日K資料模擬逐日買賣，成交價統一以當天收盤價計算，不會真的下單，也不影響帳戶資金。
+                </p>
+                {backtestError && <div className="error-msg">{backtestError}</div>}
+                {backtestResult && (
+                  <div className="backtest-result">
+                    {backtestResult.warning && <div className="order-hint warn">{backtestResult.warning}</div>}
+                    <div className="backtest-stats-grid">
+                      <div className="stat">
+                        <span className="label">期末資產</span>
+                        <span className="value">{backtestResult.final_assets.toLocaleString()}</span>
+                      </div>
+                      <div className="stat">
+                        <span className="label">總報酬率</span>
+                        <span className={`value ${backtestResult.total_return_percent >= 0 ? "buy-text" : "sell-text"}`}>
+                          {backtestResult.total_return_percent >= 0 ? "+" : ""}
+                          {backtestResult.total_return_percent.toFixed(2)}%
+                        </span>
+                      </div>
+                      <div className="stat">
+                        <span className="label">最大回撤</span>
+                        <span className="value">{backtestResult.max_drawdown_percent.toFixed(2)}%</span>
+                      </div>
+                      <div className="stat">
+                        <span className="label">交易次數</span>
+                        <span className="value">{backtestResult.trade_count}</span>
+                      </div>
+                      <div className="stat">
+                        <span className="label">勝率</span>
+                        <span className="value">
+                          {backtestResult.win_rate != null ? `${(backtestResult.win_rate * 100).toFixed(1)}%` : "-"}
+                          {" "}
+                          ({backtestResult.win_count}勝{backtestResult.loss_count}敗)
+                        </span>
+                      </div>
+                    </div>
+                    <EquityTrendChart
+                      points={backtestResult.equity_curve.map((p) => ({ date: p.date, value: p.total_assets }))}
+                      emptyText="這段期間沒有任何交易"
+                    />
+                  </div>
+                )}
+              </div>
+            )}
             {tradesFor === strategy.id && (
               <div className="table-scroll" style={{ marginTop: 10 }}>
                 {trades.length === 0 ? (

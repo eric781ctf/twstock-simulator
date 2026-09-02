@@ -247,3 +247,36 @@ export interface StrategyTradeRecord {
   quantity: number | null;
   status: OrderStatus | null;
 }
+
+export interface EquitySnapshot {
+  snapshot_date: string;
+  cash_balance: number;
+  market_value: number;
+  total_assets: number;
+}
+
+export interface BacktestRequest {
+  start_date: string;
+  end_date: string;
+  initial_cash: number;
+}
+
+export interface EquityCurvePoint {
+  date: string;
+  total_assets: number;
+}
+
+export interface BacktestResult {
+  start_date: string;
+  end_date: string;
+  initial_cash: number;
+  final_assets: number;
+  total_return_percent: number;
+  max_drawdown_percent: number;
+  trade_count: number;
+  win_count: number;
+  loss_count: number;
+  win_rate: number | null;
+  equity_curve: EquityCurvePoint[];
+  warning: string | null;
+}
