@@ -8,9 +8,28 @@ function isoDate(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
+type BacktestRange = "3m" | "6m" | "1y";
+
+const BACKTEST_RANGE_LABEL: Record<BacktestRange, string> = {
+  "3m": "近三個月",
+  "6m": "近半年",
+  "1y": "近一年",
+};
+
+const BACKTEST_RANGE_DAYS: Record<BacktestRange, number> = {
+  "3m": 90,
+  "6m": 182,
+  "1y": 365,
+};
+
+function rangeToDates(range: BacktestRange): { start_date: string; end_date: string } {
+  const end = new Date();
+  const start = new Date(Date.now() - BACKTEST_RANGE_DAYS[range] * 24 * 60 * 60 * 1000);
+  return { start_date: isoDate(start), end_date: isoDate(end) };
+}
+
 const DEFAULT_BACKTEST_FORM = {
-  start_date: isoDate(new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)),
-  end_date: isoDate(new Date()),
+  range: "3m" as BacktestRange,
   initial_cash: "1000000",
 };
 
@@ -194,10 +213,6 @@ export default function StrategyPage() {
   async function handleRunBacktest(strategyId: number) {
     setBacktestError(null);
     const initialCash = Number(backtestForm.initial_cash);
-    if (!backtestForm.start_date || !backtestForm.end_date) {
-      setBacktestError("請選擇起始與結束日期");
-      return;
-    }
     if (!initialCash || initialCash <= 0) {
       setBacktestError("請輸入有效的期初資金");
       return;
@@ -205,8 +220,7 @@ export default function StrategyPage() {
     setBacktestBusy(true);
     try {
       const result = await api.backtestStrategy(strategyId, {
-        start_date: backtestForm.start_date,
-        end_date: backtestForm.end_date,
+        ...rangeToDates(backtestForm.range),
         initial_cash: initialCash,
       });
       setBacktestResult(result);
@@ -375,23 +389,19 @@ export default function StrategyPage() {
             </span>
             {backtestFor === strategy.id && (
               <div className="backtest-panel">
+                <div className="order-type-toggle">
+                  {(Object.keys(BACKTEST_RANGE_LABEL) as BacktestRange[]).map((range) => (
+                    <button
+                      type="button"
+                      key={range}
+                      className={backtestForm.range === range ? "active" : ""}
+                      onClick={() => setBacktestForm({ ...backtestForm, range })}
+                    >
+                      {BACKTEST_RANGE_LABEL[range]}
+                    </button>
+                  ))}
+                </div>
                 <div className="backtest-form-grid">
-                  <label>
-                    起始日期
-                    <input
-                      type="date"
-                      value={backtestForm.start_date}
-                      onChange={(e) => setBacktestForm({ ...backtestForm, start_date: e.target.value })}
-                    />
-                  </label>
-                  <label>
-                    結束日期
-                    <input
-                      type="date"
-                      value={backtestForm.end_date}
-                      onChange={(e) => setBacktestForm({ ...backtestForm, end_date: e.target.value })}
-                    />
-                  </label>
                   <label>
                     期初資金
                     <input

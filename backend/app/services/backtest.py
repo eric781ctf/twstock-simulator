@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 LOOKBACK_CALENDAR_DAYS = 130  # 跟 strategy_engine.LOOKBACK_DAYS 對齊，湊出約 60 個交易日給 MA60/KD 用
 MIN_BARS_REQUIRED = 15
-MAX_BACKTEST_CALENDAR_DAYS = 180
+MAX_BACKTEST_CALENDAR_DAYS = 370  # 留一點餘裕給前端的「近一年」選項（365 天）
 STALE_BAR_TOLERANCE_DAYS = 10  # 超過這麼多天沒有新K棒的股票，回測期間視為停牌/下市，跳過
 
 
