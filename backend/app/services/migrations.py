@@ -23,4 +23,6 @@ def run_lightweight_migrations(engine: Engine) -> None:
         conn.execute(
             text("ALTER TABLE app_config ADD COLUMN IF NOT EXISTS target_backfill_months INTEGER NOT NULL DEFAULT 3")
         )
+        # 單日成交股數會超過 int4 上限，改成 bigint（放大型別，不會動到既有資料）
+        conn.execute(text("ALTER TABLE daily_bars ALTER COLUMN volume TYPE BIGINT"))
     logger.info("run_lightweight_migrations 完成")

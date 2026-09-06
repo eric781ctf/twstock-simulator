@@ -9,7 +9,7 @@ import time
 
 import httpx
 
-from app.services.history import roc_compact_to_date, to_float, to_int
+from app.services.history import RateLimitedError, roc_compact_to_date, to_float, to_int
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +19,7 @@ TPEX_LISTED_URL = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close
 TWSE_VALUATION_URL = "https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_ALL"
 TPEX_VALUATION_URL = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_peratio_analysis"
 TWSE_VALUATION_HISTORY_URL = "https://www.twse.com.tw/exchangeReport/BWIBBU_d"
+TWSE_DAILY_QUOTES_URL = "https://www.twse.com.tw/exchangeReport/MI_INDEX"
 
 _HEADERS = {"User-Agent": "Mozilla/5.0 (twstock-simulator)"}
 
@@ -183,6 +184,69 @@ async def fetch_valuations() -> list[dict]:
         logger.exception("fetch_valuations (TPEx) failed")
 
     return stocks
+
+
+async def fetch_twse_daily_quotes_for_date(
+    query_date: str, client: httpx.AsyncClient | None = None
+) -> list[dict] | None:
+    """某一天「全市場上市股票」的收盤行情。query_date 格式 YYYYMMDD（西元）。
+
+    這支跟 STOCK_DAY 的方向正好相反：STOCK_DAY 是「一次一檔、拿一個月」，
+    這支是「一次一天、拿全部股票」。回補歷史時方向選錯，請求數會差一個
+    數量級——補 6 個月用這支只要約 120 次（每個交易日一次），用 STOCK_DAY
+    則是 1380 檔 × 6 個月 ≈ 8000 次，後者不但慢，還會一直去撞 TWSE 的限流。
+
+    回傳 None 代表「這天沒有資料」（週末、假日、或還沒收盤），跟「有資料但
+    是空的」要分得開，呼叫端才知道該跳過而不是重試。
+    """
+    owns_client = client is None
+    if owns_client:
+        client = httpx.AsyncClient(timeout=30, headers=_HEADERS)
+    try:
+        resp = await client.get(
+            TWSE_DAILY_QUOTES_URL, params={"response": "json", "date": query_date, "type": "ALL"}
+        )
+        if resp.status_code in (428, 429):
+            raise RateLimitedError(f"TWSE 回應 {resp.status_code}，疑似被限流")
+        resp.raise_for_status()
+        data = resp.json()
+    except RateLimitedError:
+        raise
+    except Exception:
+        logger.exception("fetch_twse_daily_quotes_for_date failed for %s", query_date)
+        return None
+    finally:
+        if owns_client:
+            await client.aclose()
+
+    if data.get("stat") != "OK":
+        return None  # 非交易日，TWSE 會回「很抱歉，沒有符合條件的資料!」
+
+    # 回應裡有十來張表（各種指數、大盤統計…），要的是「每日收盤行情(全部)」那張
+    table = next((t for t in data.get("tables", []) if "每日收盤行情" in (t.get("title") or "")), None)
+    if not table:
+        return None
+
+    result = []
+    for row in table.get("data") or []:
+        # row: [證券代號, 證券名稱, 成交股數, 成交筆數, 成交金額, 開盤價, 最高價, 最低價, 收盤價, ...]
+        if len(row) < 9:
+            continue
+        o, h, l, c = to_float(row[5]), to_float(row[6]), to_float(row[7]), to_float(row[8])
+        if o is None or h is None or l is None or c is None:
+            continue  # 當天沒成交的證券，價格欄位會是 "--"
+        result.append(
+            {
+                "code": row[0].strip(),
+                "name": row[1].strip(),
+                "open": o,
+                "high": h,
+                "low": l,
+                "close": c,
+                "volume": to_int(row[2]),
+            }
+        )
+    return result
 
 
 async def fetch_twse_valuations_for_date(query_date: str) -> list[dict]:

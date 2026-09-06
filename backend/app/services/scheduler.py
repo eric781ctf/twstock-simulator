@@ -22,7 +22,7 @@ from app.services.matching import (
     run_matching_cycle,
 )
 from app.services.ml.inference import run_daily_scoring
-from app.services.stock_sync import backfill_all_twse_daily_bars, sync_stocks, sync_valuations
+from app.services.stock_sync import backfill_twse_to_target, sync_stocks, sync_valuations
 from app.services.strategy_engine import run_strategy_cycle
 
 logger = logging.getLogger(__name__)
@@ -74,7 +74,7 @@ async def _daily_bar_backfill_job() -> None:
     try:
         if not is_enabled(db, SCHEDULER_DAILY_BAR_BACKFILL):
             return
-        await backfill_all_twse_daily_bars(db)
+        await backfill_twse_to_target(db)
     except Exception:
         logger.exception("每日日K回補發生錯誤")
     finally:

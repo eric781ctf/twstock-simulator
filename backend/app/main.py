@@ -31,7 +31,7 @@ from app.services.feature_flags import SCHEDULER_DAILY_BAR_BACKFILL, ensure_feat
 from app.services.migrations import run_lightweight_migrations
 from app.services.ml.training_runner import shutdown_executor
 from app.services.scheduler import start_scheduler, stop_scheduler
-from app.services.stock_sync import backfill_all_twse_daily_bars, backfill_valuation_history, sync_stocks, sync_valuations
+from app.services.stock_sync import backfill_twse_to_target, backfill_valuation_history, sync_stocks, sync_valuations
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -49,17 +49,17 @@ async def _backfill_valuation_history_task() -> None:
 
 
 async def _backfill_daily_bars_task() -> None:
-    """全上市股票的日K回補要對 TWSE 打上千次請求，放到背景執行、分批限速，
-    不要卡住應用程式啟動。之後改由 scheduler 的每日排程接手（該函式本身已有
-    「資料夠了就跳過」的判斷，兩邊各自觸發不會重複做工）。"""
+    """日K回補走「逐日抓全市場」，一個交易日一次請求就能拿到所有上市股票，
+    補半年也只要百來次請求。仍然放到背景執行，不要卡住應用程式啟動；已經補過
+    的日期會自己跳過，所以跟每日排程重複觸發也不會重複做工。"""
     db = SessionLocal()
     try:
         if is_enabled(db, SCHEDULER_DAILY_BAR_BACKFILL):
-            await backfill_all_twse_daily_bars(db)
+            await backfill_twse_to_target(db)
         else:
-            logger.info("backfill_all_twse_daily_bars: 功能已被管理員關閉，略過")
+            logger.info("日K回補：功能已被管理員關閉，略過")
     except Exception:
-        logger.exception("backfill_all_twse_daily_bars 背景任務發生錯誤")
+        logger.exception("日K回補背景任務發生錯誤")
     finally:
         db.close()
 

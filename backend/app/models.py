@@ -3,6 +3,7 @@ from datetime import date, datetime
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     Date,
     DateTime,
@@ -160,7 +161,8 @@ class DailyBar(Base):
     high: Mapped[float] = mapped_column(Float, nullable=False)
     low: Mapped[float] = mapped_column(Float, nullable=False)
     close: Mapped[float] = mapped_column(Float, nullable=False)
-    volume: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # 全市場單日成交股數會超過 int4 上限（21 億），高人氣 ETF 一天就能撞到
+    volume: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
 
 
 class PricePoint(Base):
