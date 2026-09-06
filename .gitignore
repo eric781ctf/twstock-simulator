@@ -9,3 +9,5 @@ dist/
 
 .env
 .DS_Store
+
+backend/model_artifacts/

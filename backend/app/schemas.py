@@ -144,6 +144,90 @@ class BackfillTargetIn(BaseModel):
     target_months: int = Field(gt=0, le=120)
 
 
+class FeatureOptionOut(BaseModel):
+    key: str
+    label: str
+
+
+class ModelTypeOptionOut(BaseModel):
+    key: str
+    label: str
+
+
+class TrainDefaultsOut(BaseModel):
+    """給訓練表單用的預設值與可選項目：建議的六個切分日期（依本地資料最新
+    日期往回推）、可勾選的特徵、可選的模型類型。"""
+
+    latest_data_date: date | None
+    train_start: date
+    train_end: date
+    validation_start: date
+    validation_end: date
+    test_start: date
+    test_end: date
+    default_features: list[str]
+    features: list[FeatureOptionOut]
+    model_types: list[ModelTypeOptionOut]
+
+
+class ModelTrainRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    model_family: str = Field(min_length=1, max_length=50)
+    model_type: Literal["xgboost", "lightgbm", "random_forest", "logistic_regression"]
+    feature_config: list[str] = Field(min_length=1)
+    n_days: int = Field(gt=0, le=60)
+    threshold_percent: float
+    score_formula: Literal["multiply", "zscore_weighted"] = "multiply"
+    score_weights: dict | None = None
+
+    min_hold_days: int | None = Field(default=None, ge=0, le=250)
+    max_hold_days: int | None = Field(default=None, ge=1, le=250)
+    stop_loss_percent: float | None = Field(default=None, gt=0, le=100)
+    take_profit_percent: float | None = Field(default=None, gt=0, le=1000)
+    sell_conditions: list[dict] = Field(default_factory=list)
+
+    train_start: date
+    train_end: date
+    validation_start: date
+    validation_end: date
+    test_start: date
+    test_end: date
+
+    @model_validator(mode="after")
+    def _check(self):
+        if not (self.train_start < self.train_end < self.validation_start < self.validation_end < self.test_start < self.test_end):
+            raise ValueError("日期必須依序遞增：訓練起 < 訓練迄 < 驗證起 < 驗證迄 < 測試起 < 測試迄")
+        if self.min_hold_days is not None and self.max_hold_days is not None:
+            if self.min_hold_days > self.max_hold_days:
+                raise ValueError("最少持有天數不能大於最長持有天數")
+        return self
+
+
+class ModelSummaryOut(BaseModel):
+    """模型列表用。realized/unrealized 兩個平均損益率都給，不預設哪個代表好壞。"""
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    id: int
+    model_family: str
+    version: int
+    model_type: str
+    status: str
+    is_archived: bool
+    n_days: int
+    threshold_percent: float
+    score_formula: str
+    training_duration_seconds: float | None
+    error_message: str | None
+    created_at: datetime
+    trained_at: datetime | None
+    open_holding_count: int
+    closed_holding_count: int
+    average_realized_return_percent: float | None
+    average_unrealized_return_percent: float | None
+
+
 class FeatureFlagOut(BaseModel):
     key: str
     label: str

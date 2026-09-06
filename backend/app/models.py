@@ -252,6 +252,112 @@ class EquitySnapshot(Base):
     total_assets: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False)
 
 
+class PredictionModel(Base):
+    """一次訓練 = 一筆不可變的模型版本。重新訓練不會覆蓋舊的，而是在同一個
+    model_family 底下長出新的 version，這樣「舊版本當時的績效」才不會因為重訓
+    就被洗掉。status 本身就是訓練工作的進度（不另外開一張 job 表），admin 頁面
+    直接輪詢這個欄位就知道跑到哪了。
+
+    封存（is_archived）只是讓它不再參與每日選股，歷史持有跟績效都還看得到。"""
+
+    __tablename__ = "prediction_models"
+    __table_args__ = (UniqueConstraint("model_family", "version", name="uq_prediction_model_family_version"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    model_family: Mapped[str] = mapped_column(String(50), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    model_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    feature_config: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+
+    # 預測目標：未來 n_days 天的報酬率（迴歸），以及是否超過 threshold_percent（分類）
+    n_days: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
+    threshold_percent: Mapped[float] = mapped_column(Float, nullable=False, default=3.0)
+
+    # 選股分數：multiply = 預期報酬 × 機率；zscore_weighted = 兩者各自標準化後加權平均
+    score_formula: Mapped[str] = mapped_column(String(20), nullable=False, default="multiply")
+    score_weights: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    # 出場規則（四層，依序判斷，見 services/ml/exit_rules.py）
+    min_hold_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_hold_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    stop_loss_percent: Mapped[float | None] = mapped_column(Float, nullable=True)
+    take_profit_percent: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sell_conditions: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+
+    # 依時間切分的六個界線，由 admin 在訓練表單自己指定
+    train_start: Mapped[date] = mapped_column(Date, nullable=False)
+    train_end: Mapped[date] = mapped_column(Date, nullable=False)
+    validation_start: Mapped[date] = mapped_column(Date, nullable=False)
+    validation_end: Mapped[date] = mapped_column(Date, nullable=False)
+    test_start: Mapped[date] = mapped_column(Date, nullable=False)
+    test_end: Mapped[date] = mapped_column(Date, nullable=False)
+
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued")
+    is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    metrics: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    training_duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    model_artifact_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    trained_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ModelScoringRun(Base):
+    """每個模型每一天跑選股/出場判斷的執行紀錄，主要是為了記錄耗時，順便當成
+    每日排程的稽核軌跡（哪天跑了、成功還失敗）。"""
+
+    __tablename__ = "model_scoring_runs"
+    __table_args__ = (UniqueConstraint("model_id", "run_date", name="uq_model_scoring_run_daily"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    model_id: Mapped[int] = mapped_column(ForeignKey("prediction_models.id"), nullable=False)
+    run_date: Mapped[date] = mapped_column(Date, nullable=False)
+    duration_seconds: Mapped[float] = mapped_column(Float, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="success")
+    error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ModelPrediction(Base):
+    """回測（測試集）逐筆的「預測 vs 實際」，餵給迴歸散佈圖跟分類校準曲線。
+    只存測試集——訓練集/驗證集的預測沒有評估意義（模型看過答案）。"""
+
+    __tablename__ = "model_predictions"
+    __table_args__ = (Index("ix_model_predictions_model_date", "model_id", "as_of_date"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    model_id: Mapped[int] = mapped_column(ForeignKey("prediction_models.id"), nullable=False)
+    stock_code: Mapped[str] = mapped_column(String(10), nullable=False)
+    as_of_date: Mapped[date] = mapped_column(Date, nullable=False)
+    predicted_return_percent: Mapped[float] = mapped_column(Float, nullable=False)
+    actual_return_percent: Mapped[float] = mapped_column(Float, nullable=False)
+    predicted_probability: Mapped[float] = mapped_column(Float, nullable=False)
+    actual_label: Mapped[bool] = mapped_column(Boolean, nullable=False)
+
+
+class ModelHolding(Base):
+    """模型的持有紀錄，回測模擬（source=backtest）跟正式上線後（source=live）
+    共用同一張表——兩者形狀完全一樣，差別只在是哪一段時間、由誰觸發的。
+
+    刻意不記錄股數或金額：這個系統只追蹤「損益率」，return_percent 已經扣掉
+    買賣手續費與賣出證交稅（見 services/ml/exit_rules.py 的 net_return_percent）。"""
+
+    __tablename__ = "model_holdings"
+    __table_args__ = (Index("ix_model_holdings_model_source", "model_id", "source", "status"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    model_id: Mapped[int] = mapped_column(ForeignKey("prediction_models.id"), nullable=False)
+    stock_code: Mapped[str] = mapped_column(String(10), nullable=False)
+    source: Mapped[str] = mapped_column(String(10), nullable=False, default="live")
+    entry_date: Mapped[date] = mapped_column(Date, nullable=False)
+    entry_price: Mapped[float] = mapped_column(Float, nullable=False)
+    exit_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    exit_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    status: Mapped[str] = mapped_column(String(10), nullable=False, default="open")
+    return_percent: Mapped[float | None] = mapped_column(Float, nullable=True)
+    exit_reason: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
+
 class WatchlistItem(Base):
     """使用者自選股清單，每個帳戶最多 20 檔。清單內的股票會被排入每日分時資料
     的追蹤範圍（見 matching.run_matching_cycle），並顯示在該使用者首頁。"""
