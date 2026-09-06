@@ -8,10 +8,11 @@ from sqlalchemy.orm import Session
 
 from app.models import DailyBar, Market, Stock, StockValuationHistory
 from app.services import backfill_status
-from app.services.history import RateLimitedError, backfill_twse_history
+from app.services.history import RateLimitedError, backfill_twse_history, upsert_daily_bar
 from app.services.twse_client import (
     fetch_listed_stocks,
     fetch_otc_stocks,
+    fetch_twse_daily_quotes_for_date,
     fetch_twse_valuations_for_date,
     fetch_valuations,
 )
@@ -176,6 +177,118 @@ async def backfill_valuation_history(db: Session, months: int = VALUATION_BACKFI
     db.commit()
     logger.info("backfill_valuation_history: 回補完成，共寫入 %d 筆快照", total)
     return total
+
+
+DAILY_BY_DATE_DELAY_SECONDS = 5.0  # 逐日回補的請求間隔；一天一次請求，這個節奏遠低於限流門檻
+DAILY_BY_DATE_MIN_ROWS = 200  # 某一天本地已有這麼多筆上市日K，就當作那天補過了
+
+
+async def backfill_twse_daily_bars_by_date(
+    db: Session,
+    start: date,
+    end: date,
+    request_delay: float = DAILY_BY_DATE_DELAY_SECONDS,
+) -> int:
+    """逐「日」回補全市場上市股票的日K（跟 backfill_all_twse_daily_bars 逐「檔」
+    回補相對）。
+
+    方向選對，請求數差一個數量級：TWSE 的 MI_INDEX 端點一次就回傳某一天全部
+    上市股票的開高低收量，所以補 6 個月只要約 120 次請求（每個交易日一次），
+    而逐檔的 STOCK_DAY 要 1380 檔 × 6 個月 ≈ 8000 次。少打 98% 的請求，自然
+    也就不會一直去撞限流——這比想辦法繞過限流正確得多。
+
+    已經有足夠資料的日期會直接跳過，所以重跑不會浪費請求；週末假日 TWSE 會回
+    「沒有符合條件的資料」，也一樣跳過。
+    """
+    known_codes = {c for (c,) in db.query(Stock.code).filter(Stock.market == Market.TWSE).all()}
+    if not known_codes:
+        backfill_status.finish(backfill_status.PHASE_COMPLETED, "本地還沒有上市股票清單")
+        return 0
+
+    # 先問清楚哪些日期已經補過，避免重跑時重複打同樣的請求
+    existing_counts = dict(
+        db.query(DailyBar.trade_date, func.count(DailyBar.id))
+        .filter(DailyBar.trade_date >= start, DailyBar.trade_date <= end)
+        .group_by(DailyBar.trade_date)
+        .all()
+    )
+
+    all_days = [start + timedelta(days=i) for i in range((end - start).days + 1)]
+    # 週末直接排除，不用浪費請求去問 TWSE
+    candidate_days = [d for d in all_days if d.weekday() < 5]
+    pending_days = [d for d in candidate_days if existing_counts.get(d, 0) < DAILY_BY_DATE_MIN_ROWS]
+
+    backfill_status.begin(len(pending_days))
+    if not pending_days:
+        backfill_status.finish(backfill_status.PHASE_COMPLETED, f"{start} ~ {end} 的日K都已經補齊了")
+        return 0
+
+    backfill_status.set_batch(len(pending_days), len(pending_days))
+    logger.info(
+        "backfill_twse_daily_bars_by_date: %s ~ %s 共 %d 個待補日期（已跳過 %d 個補過的與週末）",
+        start,
+        end,
+        len(pending_days),
+        len(candidate_days) - len(pending_days),
+    )
+
+    written = 0
+    processed = 0
+    try:
+        async with httpx.AsyncClient(timeout=30, headers=_HEADERS) as client:
+            for i, day in enumerate(pending_days):
+                if i > 0:
+                    await _throttled_sleep(request_delay, "每個交易日之間的間隔")
+
+                backfill_status.set_running(day.isoformat(), processed, written)
+                try:
+                    quotes = await fetch_twse_daily_quotes_for_date(day.strftime("%Y%m%d"), client=client)
+                except RateLimitedError:
+                    logger.warning("backfill_twse_daily_bars_by_date: 被 TWSE 限流，在 %s 中止", day)
+                    backfill_status.finish(
+                        backfill_status.PHASE_RATE_LIMITED,
+                        f"被 TWSE 限流，本輪補到 {day} 為止（已寫入 {written} 筆），剩下的留給下次",
+                    )
+                    return written
+
+                processed += 1
+                if not quotes:
+                    continue  # 非交易日
+
+                for item in quotes:
+                    if item["code"] not in known_codes:
+                        continue  # 權證、債券之類不在我們的股票清單裡
+                    upsert_daily_bar(
+                        db, item["code"], day, item["open"], item["high"], item["low"], item["close"], item["volume"]
+                    )
+                    written += 1
+                db.commit()
+    except Exception as e:
+        logger.exception("backfill_twse_daily_bars_by_date: 本輪中斷")
+        backfill_status.finish(backfill_status.PHASE_FAILED, str(e)[:200])
+        raise
+
+    backfill_status.set_running("", processed, written)
+    backfill_status.finish(
+        backfill_status.PHASE_COMPLETED,
+        f"本輪處理 {processed} 個交易日、寫入 {written} 筆日K（{start} ~ {end}）",
+    )
+    logger.info("backfill_twse_daily_bars_by_date: 完成 %d 個日期、寫入 %d 筆", processed, written)
+    return written
+
+
+async def backfill_twse_to_target(db: Session) -> int:
+    """把 TWSE 日K補到 admin 設定的目標月數那麼久以前。
+
+    啟動、每日排程、admin 手動觸發三個進入點都走這裡，行為才會一致——
+    不然「手動按的」跟「排程跑的」用不同策略，補出來的資料深度會對不起來。
+    """
+    from app.services.app_config import get_target_backfill_months
+
+    months = get_target_backfill_months(db)
+    end = date.today()
+    start = end - timedelta(days=months * 31)
+    return await backfill_twse_daily_bars_by_date(db, start, end)
 
 
 async def _throttled_sleep(seconds: float, reason: str) -> None:

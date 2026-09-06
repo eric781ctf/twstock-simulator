@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -27,7 +28,7 @@ from app.services.app_config import (
 )
 from app.services.auth import require_admin
 from app.services.feature_flags import FLAG_LABELS, get_all_flags, set_flag
-from app.services.stock_sync import backfill_all_twse_daily_bars, get_daily_bar_stats, get_twse_earliest_bar_date
+from app.services.stock_sync import backfill_twse_daily_bars_by_date, get_daily_bar_stats, get_twse_earliest_bar_date
 
 logger = logging.getLogger(__name__)
 
@@ -35,12 +36,16 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 
 async def _run_backfill_task(months: int) -> None:
-    """admin 手動觸發的回補，跟開機時的背景回補用同一支函式，只是換一個更大的
-    months 目標——`backfill_all_twse_daily_bars` 本來就是「從今天回推 N 個月」，
-    調大目標自然會把還不夠深的股票往更早的月份補。"""
+    """admin 手動觸發的回補，走「逐日抓全市場」而不是「逐檔抓歷史」。
+
+    同樣補 N 個月，逐日只要每個交易日一次請求（6 個月約 120 次），逐檔則要
+    1380 檔 × N 個月（約 8000 次）。少打 98% 的請求，速度快得多，也不會一直
+    去撞 TWSE 的限流。"""
     db = SessionLocal()
     try:
-        await backfill_all_twse_daily_bars(db, months=months)
+        end = date.today()
+        start = end - timedelta(days=months * 31)
+        await backfill_twse_daily_bars_by_date(db, start, end)
     except Exception:
         logger.exception("手動觸發的日K回補發生錯誤")
     finally:
