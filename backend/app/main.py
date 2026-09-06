@@ -18,6 +18,7 @@ from app.routers import (
     models,
     orders,
     positions,
+    public_models,
     stocks,
     strategies,
     trades,
@@ -112,6 +113,7 @@ app.include_router(watchlist.router)
 app.include_router(leaderboard.router)
 app.include_router(market_session.router)
 app.include_router(models.router)
+app.include_router(public_models.router)
 app.include_router(strategies.router)
 app.include_router(admin.router)
 app.include_router(feature_flags.router)

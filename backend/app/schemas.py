@@ -228,6 +228,92 @@ class ModelSummaryOut(BaseModel):
     average_unrealized_return_percent: float | None
 
 
+class ModelHoldingOut(BaseModel):
+    stock_code: str
+    stock_name: str
+    entry_date: date
+    entry_price: float
+    exit_date: date | None
+    exit_price: float | None
+    status: str
+    return_percent: float | None
+    exit_reason: str | None
+    held_days: int
+    current_price: float | None
+
+
+class ModelPredictionPointOut(BaseModel):
+    predicted_return_percent: float
+    actual_return_percent: float
+    predicted_probability: float
+    actual_label: bool
+
+
+class CalibrationBucketOut(BaseModel):
+    """分桶校準曲線的一個桶：預測機率落在這個區間的樣本，實際達標比例是多少。"""
+
+    bucket_start: float
+    bucket_end: float
+    average_predicted: float
+    actual_rate: float
+    sample_count: int
+
+
+class BacktestTradePointOut(BaseModel):
+    entry_date: date
+    return_percent: float
+    stock_code: str
+    exit_reason: str | None
+
+
+class FeatureImportanceOut(BaseModel):
+    feature: str
+    label: str
+    importance: float
+
+
+class ScoringRunOut(BaseModel):
+    run_date: date
+    duration_seconds: float
+    status: str
+
+
+class ModelDetailOut(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    summary: ModelSummaryOut
+
+    # 訓練參數（公開透明：讓看的人知道這個模型是怎麼練出來的）
+    feature_config: list[str]
+    feature_labels: list[str]
+    min_hold_days: int | None
+    max_hold_days: int | None
+    stop_loss_percent: float | None
+    take_profit_percent: float | None
+    sell_conditions: list[dict]
+    score_weights: dict | None
+    train_start: date
+    train_end: date
+    validation_start: date
+    validation_end: date
+    test_start: date
+    test_end: date
+
+    metrics: dict | None
+    warnings: list[str]
+
+    regression_points: list[ModelPredictionPointOut]
+    calibration_buckets: list[CalibrationBucketOut]
+    backtest_trades: list[BacktestTradePointOut]
+    regression_feature_importance: list[FeatureImportanceOut]
+    classification_feature_importance: list[FeatureImportanceOut]
+
+    open_holdings: list[ModelHoldingOut]
+    closed_holdings: list[ModelHoldingOut]
+    scoring_runs: list[ScoringRunOut]
+    average_scoring_seconds: float | None
+
+
 class FeatureFlagOut(BaseModel):
     key: str
     label: str

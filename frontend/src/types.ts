@@ -177,6 +177,83 @@ export interface ModelTrainRequest {
   test_end: string;
 }
 
+export interface ModelHoldingItem {
+  stock_code: string;
+  stock_name: string;
+  entry_date: string;
+  entry_price: number;
+  exit_date: string | null;
+  exit_price: number | null;
+  status: "open" | "closed";
+  return_percent: number | null;
+  exit_reason: string | null;
+  held_days: number;
+  current_price: number | null;
+}
+
+export interface ModelPredictionPoint {
+  predicted_return_percent: number;
+  actual_return_percent: number;
+  predicted_probability: number;
+  actual_label: boolean;
+}
+
+export interface CalibrationBucket {
+  bucket_start: number;
+  bucket_end: number;
+  average_predicted: number;
+  actual_rate: number;
+  sample_count: number;
+}
+
+export interface BacktestTradePoint {
+  entry_date: string;
+  return_percent: number;
+  stock_code: string;
+  exit_reason: string | null;
+}
+
+export interface FeatureImportance {
+  feature: string;
+  label: string;
+  importance: number;
+}
+
+export interface ScoringRun {
+  run_date: string;
+  duration_seconds: number;
+  status: string;
+}
+
+export interface ModelDetail {
+  summary: ModelSummary;
+  feature_config: string[];
+  feature_labels: string[];
+  min_hold_days: number | null;
+  max_hold_days: number | null;
+  stop_loss_percent: number | null;
+  take_profit_percent: number | null;
+  sell_conditions: Condition[];
+  score_weights: { return: number; probability: number } | null;
+  train_start: string;
+  train_end: string;
+  validation_start: string;
+  validation_end: string;
+  test_start: string;
+  test_end: string;
+  metrics: Record<string, any> | null;
+  warnings: string[];
+  regression_points: ModelPredictionPoint[];
+  calibration_buckets: CalibrationBucket[];
+  backtest_trades: BacktestTradePoint[];
+  regression_feature_importance: FeatureImportance[];
+  classification_feature_importance: FeatureImportance[];
+  open_holdings: ModelHoldingItem[];
+  closed_holdings: ModelHoldingItem[];
+  scoring_runs: ScoringRun[];
+  average_scoring_seconds: number | null;
+}
+
 export interface ModelSummary {
   id: number;
   model_family: string;
