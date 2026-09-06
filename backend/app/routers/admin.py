@@ -17,6 +17,7 @@ from app.schemas import (
     DefaultInitialCashOut,
     FeatureFlagOut,
     FeatureFlagUpdateIn,
+    SchedulerFlagOut,
 )
 from app.services import backfill_status
 from app.services.admin import AdminActionError, add_cash_to_all, delete_account, freeze_account, list_all_accounts
@@ -27,7 +28,7 @@ from app.services.app_config import (
     set_target_backfill_months,
 )
 from app.services.auth import require_admin
-from app.services.feature_flags import FLAG_LABELS, get_all_flags, set_flag
+from app.services.feature_flags import FLAG_LABELS, get_all_flags, get_model_system_flags, set_flag
 from app.services.stock_sync import backfill_twse_daily_bars_by_date, get_daily_bar_stats, get_twse_earliest_bar_date
 
 logger = logging.getLogger(__name__)
@@ -133,6 +134,12 @@ async def trigger_backfill(payload: BackfillTargetIn, db: Session = Depends(get_
     months = set_target_backfill_months(db, payload.target_months)
     asyncio.create_task(_run_backfill_task(months))
     return _backfill_status_out(db, months)
+
+
+@router.get("/models/schedulers", response_model=list[SchedulerFlagOut])
+def list_model_schedulers(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    """只回傳跟預測模型系統有關的排程開關。切換沿用下面的 feature-flags 端點。"""
+    return [SchedulerFlagOut(**flag) for flag in get_model_system_flags(db)]
 
 
 @router.get("/feature-flags", response_model=list[FeatureFlagOut])

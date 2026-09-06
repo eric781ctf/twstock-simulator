@@ -3,7 +3,7 @@ import { Navigate } from "react-router-dom";
 import { api } from "../api";
 import { BarChart } from "../components/BarChart";
 import { useAuth } from "../auth/AuthContext";
-import type { BackfillStatus, DailyBarStats } from "../types";
+import type { BackfillStatus, DailyBarStats, SchedulerFlag } from "../types";
 
 function formatWait(seconds: number): string {
   if (seconds < 60) return `${seconds} 秒`;
@@ -22,6 +22,7 @@ export default function AdminPage() {
   const [backfillStatus, setBackfillStatus] = useState<BackfillStatus | null>(null);
   const [backfillTargetInput, setBackfillTargetInput] = useState("");
   const [backfillBusy, setBackfillBusy] = useState(false);
+  const [schedulers, setSchedulers] = useState<SchedulerFlag[]>([]);
 
   const refreshDailyBarStats = useCallback(async () => {
     const res = await api.getDailyBarStats();
@@ -33,6 +34,10 @@ export default function AdminPage() {
     setBackfillStatus(res);
   }, []);
 
+  const refreshSchedulers = useCallback(async () => {
+    setSchedulers(await api.getModelSchedulers());
+  }, []);
+
   const progress = backfillStatus?.progress ?? null;
   const isBackfillRunning =
     progress != null && ["preparing", "running", "throttling"].includes(progress.phase);
@@ -41,7 +46,8 @@ export default function AdminPage() {
     if (!isAdmin) return;
     refreshDailyBarStats();
     refreshBackfillStatus();
-  }, [isAdmin, refreshDailyBarStats, refreshBackfillStatus]);
+    refreshSchedulers();
+  }, [isAdmin, refreshDailyBarStats, refreshBackfillStatus, refreshSchedulers]);
 
   // 回補大多數時間都停在節流等待，狀態列要會自己動，不然使用者分不出來是
   // 系統卡住還是正在乖乖等。只在真的有任務在跑時輪詢，閒置時不用一直打。
@@ -75,6 +81,21 @@ export default function AdminPage() {
     }
   }
 
+  async function handleToggleScheduler(flag: SchedulerFlag) {
+    const next = !flag.enabled;
+    if (!window.confirm(`確定要${next ? "開啟" : "關閉"}「${flag.label}」嗎？
+
+${flag.description}`)) return;
+
+    setSchedulers((prev) => prev.map((f) => (f.key === flag.key ? { ...f, enabled: next } : f)));
+    try {
+      await api.setFeatureFlag(flag.key, next);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "切換失敗");
+      await refreshSchedulers();
+    }
+  }
+
   return (
     <>
       <h2 className="section-title">管理後台</h2>
@@ -104,7 +125,7 @@ export default function AdminPage() {
               </span>
               {isBackfillRunning && progress.total > 0 && (
                 <span className="backfill-counts">
-                  本輪 {progress.processed}/{progress.total} 檔　全市場還剩 {progress.remaining_targets} 檔待補
+                  本輪 {progress.processed}/{progress.total} 個交易日
                 </span>
               )}
             </div>
@@ -119,19 +140,19 @@ export default function AdminPage() {
             )}
 
             <div className="backfill-detail">
-              {progress.phase === "running" && progress.current_stock_code && (
-                <>正在抓 {progress.current_stock_code} 的歷史資料　已寫入 {progress.written_bars} 筆日K</>
+              {progress.phase === "running" && progress.current_target && (
+                <>正在抓 {progress.current_target} 的全市場收盤資料　已寫入 {progress.written_bars} 筆日K</>
               )}
               {progress.phase === "throttling" && (
                 <>
-                  為了避免被 TWSE 封鎖而主動放慢速度（{progress.wait_reason}）
+                  主動放慢請求速度（{progress.wait_reason}）
                   {progress.wait_seconds_remaining != null && `　還要等 ${formatWait(progress.wait_seconds_remaining)}`}
                 </>
               )}
               {progress.phase === "rate_limited" && <>{progress.message}</>}
               {(progress.phase === "completed" || progress.phase === "failed") && progress.message}
               {progress.phase === "idle" && <>目前沒有回補任務在跑</>}
-              {progress.phase === "preparing" && <>正在盤點還有哪些股票需要回補</>}
+              {progress.phase === "preparing" && <>正在盤點還有哪些日期需要回補</>}
             </div>
           </div>
         )}
@@ -149,6 +170,27 @@ export default function AdminPage() {
           </button>
         </div>
       </form>
+
+      <div className="panel">
+        <h2>排程開關</h2>
+        <p className="order-hint">只列出跟預測模型有關的排程，關閉會立即生效，不需要重新部署</p>
+        {schedulers.length === 0 ? (
+          <div className="empty-hint">載入中...</div>
+        ) : (
+          schedulers.map((flag) => (
+            <div className="scheduler-flag-row" key={flag.key}>
+              <div className="scheduler-flag-info">
+                <span className="scheduler-flag-name">{flag.label}</span>
+                <span className="scheduler-flag-desc">{flag.description}</span>
+              </div>
+              <label className="toggle-switch">
+                <input type="checkbox" checked={flag.enabled} onChange={() => handleToggleScheduler(flag)} />
+                <span className="toggle-switch-slider" />
+              </label>
+            </div>
+          ))
+        )}
+      </div>
 
       <div className="panel">
         <h2>上市（TWSE）日K資料完整度</h2>
