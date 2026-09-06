@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider } from "./auth/AuthContext";
 import { Layout } from "./components/Layout";
+import AdminModelsPage from "./pages/AdminModelsPage";
 import AdminPage from "./pages/AdminPage";
 import LoginPage from "./pages/LoginPage";
 import PlaceholderHomePage from "./pages/PlaceholderHomePage";
@@ -18,6 +19,7 @@ export default function App() {
           <Route element={<Layout />}>
             <Route path="/" element={<PlaceholderHomePage />} />
             <Route path="/admin" element={<AdminPage />} />
+            <Route path="/admin/models" element={<AdminModelsPage />} />
             <Route path="/tutorial" element={<TutorialPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />

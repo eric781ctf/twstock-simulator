@@ -12,6 +12,7 @@ SCHEDULER_STRATEGY_POLL = "scheduler_strategy_poll"
 SCHEDULER_DAILY_STOCK_SYNC = "scheduler_daily_stock_sync"
 SCHEDULER_DAILY_BAR_BACKFILL = "scheduler_daily_bar_backfill"
 SCHEDULER_EQUITY_SNAPSHOT = "scheduler_equity_snapshot"
+SCHEDULER_MODEL_SCORING = "scheduler_model_scoring"
 
 FLAG_LABELS: dict[str, str] = {
     STRATEGY: "策略功能",
@@ -20,6 +21,7 @@ FLAG_LABELS: dict[str, str] = {
     SCHEDULER_DAILY_STOCK_SYNC: "每日股票同步排程",
     SCHEDULER_DAILY_BAR_BACKFILL: "每日日K回補排程",
     SCHEDULER_EQUITY_SNAPSHOT: "每日績效快照排程",
+    SCHEDULER_MODEL_SCORING: "每日模型選股排程",
 }
 
 FLAG_KEYS = list(FLAG_LABELS.keys())

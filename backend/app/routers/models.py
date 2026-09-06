@@ -122,3 +122,32 @@ async def create_model(
     asyncio.create_task(run_training_job(model.id))
     logger.info("已排入訓練：模型 %d（%s v%d）", model.id, model.model_family, model.version)
     return _to_summary(model, {})
+
+
+def _get_model(db: Session, model_id: int) -> PredictionModel:
+    model = db.get(PredictionModel, model_id)
+    if model is None:
+        raise HTTPException(status_code=404, detail="模型不存在")
+    return model
+
+
+@router.post("/{model_id}/archive", response_model=ModelSummaryOut)
+def archive_model(model_id: int, db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    """封存後不再參與每日選股，但已經開著的持有會維持原狀停在那裡，歷史績效
+    也照樣看得到——封存是「停止繼續動作」，不是「刪掉這段歷史」。"""
+    model = _get_model(db, model_id)
+    model.is_archived = True
+    db.commit()
+    db.refresh(model)
+    stats = summarize_holdings(db, [model.id])
+    return _to_summary(model, stats.get(model.id, {}))
+
+
+@router.post("/{model_id}/unarchive", response_model=ModelSummaryOut)
+def unarchive_model(model_id: int, db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    model = _get_model(db, model_id)
+    model.is_archived = False
+    db.commit()
+    db.refresh(model)
+    stats = summarize_holdings(db, [model.id])
+    return _to_summary(model, stats.get(model.id, {}))

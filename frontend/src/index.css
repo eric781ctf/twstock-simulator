@@ -435,6 +435,75 @@ tbody tr:hover {
   font-weight: 600;
 }
 
+.feature-checkbox-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.feature-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--input-bg);
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.feature-checkbox.active {
+  border-color: var(--accent);
+  color: var(--text);
+  background: rgba(79, 216, 255, 0.08);
+}
+
+.feature-checkbox input {
+  width: auto;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.archived-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  background: var(--border-strong);
+  color: var(--muted);
+}
+
+.model-error {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--buy);
+  max-width: 320px;
+  white-space: normal;
+}
+
+.model-notice {
+  color: var(--accent);
+  font-size: 13px;
+}
+
+.model-status-training,
+.model-status-queued {
+  color: var(--accent);
+}
+
+.model-status-completed {
+  color: var(--sell);
+}
+
+.model-status-failed {
+  color: var(--buy);
+}
+
 .equity-return-badge {
   font-family: var(--font-mono);
   font-weight: 700;
