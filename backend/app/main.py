@@ -15,6 +15,7 @@ from app.routers import (
     leaderboard,
     market_data,
     market_session,
+    models,
     orders,
     positions,
     stocks,
@@ -27,6 +28,7 @@ from app.services.app_config import ensure_app_config
 from app.services.equity import snapshot_all_accounts_equity
 from app.services.feature_flags import SCHEDULER_DAILY_BAR_BACKFILL, ensure_feature_flags, is_enabled
 from app.services.migrations import run_lightweight_migrations
+from app.services.ml.training_runner import shutdown_executor
 from app.services.scheduler import start_scheduler, stop_scheduler
 from app.services.stock_sync import backfill_all_twse_daily_bars, backfill_valuation_history, sync_stocks, sync_valuations
 
@@ -86,6 +88,7 @@ async def lifespan(app: FastAPI):
     backfill_task.cancel()
     daily_bars_backfill_task.cancel()
     stop_scheduler()
+    shutdown_executor()
 
 
 app = FastAPI(title="TWStock 零股模擬交易", lifespan=lifespan)
@@ -108,6 +111,7 @@ app.include_router(market_data.router)
 app.include_router(watchlist.router)
 app.include_router(leaderboard.router)
 app.include_router(market_session.router)
+app.include_router(models.router)
 app.include_router(strategies.router)
 app.include_router(admin.router)
 app.include_router(feature_flags.router)

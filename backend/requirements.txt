@@ -9,3 +9,9 @@ apscheduler==3.10.4
 tzdata==2024.2
 bcrypt==4.2.0
 pyjwt==2.9.0
+numpy==2.1.1
+pandas==2.2.3
+scikit-learn==1.5.2
+xgboost==2.1.1
+lightgbm==4.5.0
+joblib==1.4.2
