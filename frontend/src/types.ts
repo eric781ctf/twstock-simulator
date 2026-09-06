@@ -124,9 +124,34 @@ export interface DailyBarStats {
   tpex: DailyBarMarketStats;
 }
 
+export type BackfillPhase =
+  | "idle"
+  | "preparing"
+  | "running"
+  | "throttling"
+  | "rate_limited"
+  | "completed"
+  | "failed";
+
+export interface BackfillProgress {
+  phase: BackfillPhase;
+  phase_label: string;
+  current_stock_code: string | null;
+  processed: number;
+  total: number;
+  remaining_targets: number;
+  written_bars: number;
+  wait_seconds_remaining: number | null;
+  wait_reason: string | null;
+  message: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
 export interface BackfillStatus {
   earliest_date: string | null;
   target_months: number;
+  progress: BackfillProgress;
 }
 
 export interface FeatureFlag {

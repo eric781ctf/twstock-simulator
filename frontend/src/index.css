@@ -313,6 +313,99 @@ button.submit:disabled {
   color: var(--buy);
 }
 
+.backfill-progress {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  background: var(--input-bg);
+}
+
+.backfill-progress-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.backfill-phase {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.backfill-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+/* 正在打 API：綠色恆亮 */
+.backfill-progress.phase-running .backfill-phase {
+  color: var(--sell);
+}
+
+/* 我們自己在節流：藍色呼吸燈，表示系統活著、只是刻意在等 */
+.backfill-progress.phase-throttling .backfill-phase,
+.backfill-progress.phase-preparing .backfill-phase {
+  color: var(--accent);
+}
+
+.backfill-progress.phase-throttling .backfill-dot,
+.backfill-progress.phase-preparing .backfill-dot {
+  animation: backfill-pulse 1.6s ease-in-out infinite;
+}
+
+/* 被 TWSE 擋下來：紅色，這個要看得出來跟上面兩種不一樣 */
+.backfill-progress.phase-rate_limited,
+.backfill-progress.phase-failed {
+  border-color: var(--buy);
+}
+
+.backfill-progress.phase-rate_limited .backfill-phase,
+.backfill-progress.phase-failed .backfill-phase {
+  color: var(--buy);
+}
+
+@keyframes backfill-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+
+.backfill-counts {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.backfill-bar {
+  height: 5px;
+  border-radius: 3px;
+  background: var(--border);
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.backfill-bar-fill {
+  height: 100%;
+  background: var(--accent-gradient);
+  transition: width 0.4s ease;
+}
+
+.backfill-detail {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
 .market-session-badge {
   display: inline-flex;
   align-items: center;

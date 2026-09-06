@@ -135,9 +135,28 @@ class DailyBarStatsOut(BaseModel):
     tpex: DailyBarMarketStatsOut
 
 
+class BackfillProgressOut(BaseModel):
+    """回補任務當下的即時進度。phase 分成閒置/準備中/回補中/節流等待中/
+    被限流中止/完成/失敗——特別要能分辨「我們主動節流」跟「被 TWSE 擋」。"""
+
+    phase: str
+    phase_label: str
+    current_stock_code: str | None
+    processed: int
+    total: int
+    remaining_targets: int
+    written_bars: int
+    wait_seconds_remaining: int | None
+    wait_reason: str | None
+    message: str | None
+    started_at: datetime | None
+    finished_at: datetime | None
+
+
 class BackfillStatusOut(BaseModel):
     earliest_date: date | None
     target_months: int
+    progress: BackfillProgressOut
 
 
 class BackfillTargetIn(BaseModel):
