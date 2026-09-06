@@ -9,6 +9,7 @@ from app.models import User
 from app.schemas import (
     AdminAccountOut,
     AdminAmountIn,
+    BackfillProgressOut,
     BackfillStatusOut,
     BackfillTargetIn,
     DailyBarStatsOut,
@@ -16,6 +17,7 @@ from app.schemas import (
     FeatureFlagOut,
     FeatureFlagUpdateIn,
 )
+from app.services import backfill_status
 from app.services.admin import AdminActionError, add_cash_to_all, delete_account, freeze_account, list_all_accounts
 from app.services.app_config import (
     get_default_initial_cash,
@@ -104,19 +106,28 @@ def get_daily_bar_stats_endpoint(db: Session = Depends(get_db), _: User = Depend
     return DailyBarStatsOut(**stats)
 
 
-@router.get("/models/backfill-status", response_model=BackfillStatusOut)
-def get_backfill_status(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+def _backfill_status_out(db: Session, months: int | None = None) -> BackfillStatusOut:
     return BackfillStatusOut(
         earliest_date=get_twse_earliest_bar_date(db),
-        target_months=get_target_backfill_months(db),
+        target_months=months if months is not None else get_target_backfill_months(db),
+        progress=BackfillProgressOut(**backfill_status.snapshot()),
     )
+
+
+@router.get("/models/backfill-status", response_model=BackfillStatusOut)
+def get_backfill_status(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    return _backfill_status_out(db)
 
 
 @router.post("/models/backfill", response_model=BackfillStatusOut)
 async def trigger_backfill(payload: BackfillTargetIn, db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    # 同時跑兩輪只會讓對 TWSE 的請求密度加倍，正好是節流想避免的事
+    if backfill_status.is_active():
+        raise HTTPException(status_code=409, detail="已經有一輪回補正在進行中，請等它跑完再調整目標月數")
+
     months = set_target_backfill_months(db, payload.target_months)
     asyncio.create_task(_run_backfill_task(months))
-    return BackfillStatusOut(earliest_date=get_twse_earliest_bar_date(db), target_months=months)
+    return _backfill_status_out(db, months)
 
 
 @router.get("/feature-flags", response_model=list[FeatureFlagOut])

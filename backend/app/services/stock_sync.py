@@ -7,6 +7,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models import DailyBar, Market, Stock, StockValuationHistory
+from app.services import backfill_status
 from app.services.history import RateLimitedError, backfill_twse_history
 from app.services.twse_client import (
     fetch_listed_stocks,
@@ -177,6 +178,13 @@ async def backfill_valuation_history(db: Session, months: int = VALUATION_BACKFI
     return total
 
 
+async def _throttled_sleep(seconds: float, reason: str) -> None:
+    """睡覺前先把「在等什麼、要等多久」記進狀態，前端才能顯示倒數，而不是
+    讓使用者看著一個完全靜止的畫面猜系統是不是掛了。"""
+    backfill_status.begin_wait(seconds, reason)
+    await asyncio.sleep(seconds)
+
+
 async def backfill_all_twse_daily_bars(
     db: Session,
     months: int = DAILY_BAR_BACKFILL_MONTHS,
@@ -201,9 +209,11 @@ async def backfill_all_twse_daily_bars(
     剩下沒補到的股票下次執行（明天的排程，或下次重啟）會因為還是「資料不足」
     被重新排進 targets，之後自然接著補，用多跑幾天的方式換取不要被封鎖。"""
     cutoff = date.today() - timedelta(days=months * 31 + 10)
+    backfill_status.begin(0)
 
     twse_codes = [c for (c,) in db.query(Stock.code).filter(Stock.market == Market.TWSE).all()]
     if not twse_codes:
+        backfill_status.finish(backfill_status.PHASE_COMPLETED, "本地還沒有上市股票清單")
         return 0
 
     bar_counts = dict(
@@ -215,6 +225,7 @@ async def backfill_all_twse_daily_bars(
     all_targets = [code for code in twse_codes if bar_counts.get(code, 0) < DAILY_BAR_MIN_BARS]
     if not all_targets:
         logger.info("backfill_all_twse_daily_bars: 全部上市股票資料都已足夠，略過")
+        backfill_status.finish(backfill_status.PHASE_COMPLETED, "全部上市股票的資料都已足夠")
         return 0
 
     targets = all_targets[:max_per_run]
@@ -223,30 +234,42 @@ async def backfill_all_twse_daily_bars(
         len(all_targets),
         len(targets),
     )
+    backfill_status.set_batch(len(targets), len(all_targets))
     total = 0
     processed = 0
-    async with httpx.AsyncClient(timeout=15, headers=_HEADERS) as client:
-        for i, code in enumerate(targets):
-            if i > 0:
-                await asyncio.sleep(DAILY_BAR_STOCK_DELAY_SECONDS)
-                if i % batch_size == 0:
-                    await asyncio.sleep(delay_seconds)
+    try:
+        async with httpx.AsyncClient(timeout=15, headers=_HEADERS) as client:
+            for i, code in enumerate(targets):
+                if i > 0:
+                    await _throttled_sleep(DAILY_BAR_STOCK_DELAY_SECONDS, "股票之間的間隔")
+                    if i % batch_size == 0:
+                        await _throttled_sleep(delay_seconds, f"每 {batch_size} 檔的長休息")
 
-            try:
-                total += await backfill_twse_history(
-                    db, code, months, client=client, request_delay=DAILY_BAR_REQUEST_DELAY_SECONDS
-                )
-                processed += 1
-            except RateLimitedError:
-                logger.warning(
-                    "backfill_all_twse_daily_bars: 被 TWSE 限流，中止本次回補（已處理 %d/%d 檔），剩下的留給下次排程",
-                    processed,
-                    len(targets),
-                )
-                break
-            except Exception:
-                logger.exception("backfill_all_twse_daily_bars: %s 回補失敗", code)
-                processed += 1
+                backfill_status.set_running(code, processed, total)
+                try:
+                    total += await backfill_twse_history(
+                        db, code, months, client=client, request_delay=DAILY_BAR_REQUEST_DELAY_SECONDS
+                    )
+                    processed += 1
+                except RateLimitedError:
+                    logger.warning(
+                        "backfill_all_twse_daily_bars: 被 TWSE 限流，中止本次回補（已處理 %d/%d 檔），剩下的留給下次排程",
+                        processed,
+                        len(targets),
+                    )
+                    backfill_status.set_running(code, processed, total)
+                    backfill_status.finish(
+                        backfill_status.PHASE_RATE_LIMITED,
+                        f"被 TWSE 限流，本輪在第 {processed}/{len(targets)} 檔中止，剩下的留給下次排程",
+                    )
+                    return total
+                except Exception:
+                    logger.exception("backfill_all_twse_daily_bars: %s 回補失敗", code)
+                    processed += 1
+    except Exception as e:
+        logger.exception("backfill_all_twse_daily_bars: 本輪回補中斷")
+        backfill_status.finish(backfill_status.PHASE_FAILED, str(e)[:200])
+        raise
 
     logger.info(
         "backfill_all_twse_daily_bars: 本次處理 %d/%d 檔、寫入 %d 筆日K（全市場還剩 %d 檔待補）",
@@ -254,6 +277,11 @@ async def backfill_all_twse_daily_bars(
         len(targets),
         total,
         len(all_targets) - processed,
+    )
+    backfill_status.set_running("", processed, total)
+    backfill_status.finish(
+        backfill_status.PHASE_COMPLETED,
+        f"本輪處理 {processed} 檔、寫入 {total} 筆日K，全市場還剩 {len(all_targets) - processed} 檔待補",
     )
     return total
 
