@@ -129,6 +129,74 @@ export interface BackfillStatus {
   target_months: number;
 }
 
+export type ModelType = "xgboost" | "lightgbm" | "random_forest" | "logistic_regression";
+export type ScoreFormula = "multiply" | "zscore_weighted";
+export type ModelStatus = "queued" | "training" | "completed" | "failed";
+
+export interface FeatureOption {
+  key: string;
+  label: string;
+}
+
+export interface ModelTypeOption {
+  key: ModelType;
+  label: string;
+}
+
+export interface TrainDefaults {
+  latest_data_date: string | null;
+  train_start: string;
+  train_end: string;
+  validation_start: string;
+  validation_end: string;
+  test_start: string;
+  test_end: string;
+  default_features: string[];
+  features: FeatureOption[];
+  model_types: ModelTypeOption[];
+}
+
+export interface ModelTrainRequest {
+  model_family: string;
+  model_type: ModelType;
+  feature_config: string[];
+  n_days: number;
+  threshold_percent: number;
+  score_formula: ScoreFormula;
+  score_weights?: { return: number; probability: number } | null;
+  min_hold_days?: number | null;
+  max_hold_days?: number | null;
+  stop_loss_percent?: number | null;
+  take_profit_percent?: number | null;
+  sell_conditions: Condition[];
+  train_start: string;
+  train_end: string;
+  validation_start: string;
+  validation_end: string;
+  test_start: string;
+  test_end: string;
+}
+
+export interface ModelSummary {
+  id: number;
+  model_family: string;
+  version: number;
+  model_type: ModelType;
+  status: ModelStatus;
+  is_archived: boolean;
+  n_days: number;
+  threshold_percent: number;
+  score_formula: ScoreFormula;
+  training_duration_seconds: number | null;
+  error_message: string | null;
+  created_at: string;
+  trained_at: string | null;
+  open_holding_count: number;
+  closed_holding_count: number;
+  average_realized_return_percent: number | null;
+  average_unrealized_return_percent: number | null;
+}
+
 export interface FeatureFlag {
   key: string;
   label: string;

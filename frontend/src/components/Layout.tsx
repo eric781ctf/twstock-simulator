@@ -46,9 +46,14 @@ export function Layout() {
             股市教學
           </NavLink>
           {isAdmin && (
-            <NavLink to="/admin" className={({ isActive }) => (isActive ? "active" : "")}>
-              管理後台
-            </NavLink>
+            <>
+              <NavLink to="/admin" end className={({ isActive }) => (isActive ? "active" : "")}>
+                管理後台
+              </NavLink>
+              <NavLink to="/admin/models" className={({ isActive }) => (isActive ? "active" : "")}>
+                模型管理
+              </NavLink>
+            </>
           )}
         </div>
         <div className="nav-user" ref={menuRef}>

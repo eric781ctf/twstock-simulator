@@ -13,6 +13,8 @@ import type {
   FundamentalsHistoryPoint,
   LeaderboardEntry,
   MarketSession,
+  ModelSummary,
+  ModelTrainRequest,
   Order,
   OrderSide,
   OrderStatus,
@@ -26,6 +28,7 @@ import type {
   StrategyInput,
   StrategyTradeRecord,
   Trade,
+  TrainDefaults,
   WatchlistItem,
 } from "./types";
 
@@ -152,4 +155,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ target_months: targetMonths }),
     }),
+
+  getTrainDefaults: () => request<TrainDefaults>("/admin/models/train-defaults"),
+  getAdminModels: () => request<ModelSummary[]>("/admin/models"),
+  trainModel: (payload: ModelTrainRequest) =>
+    request<ModelSummary>("/admin/models", { method: "POST", body: JSON.stringify(payload) }),
+  archiveModel: (id: number) => request<ModelSummary>(`/admin/models/${id}/archive`, { method: "POST" }),
+  unarchiveModel: (id: number) => request<ModelSummary>(`/admin/models/${id}/unarchive`, { method: "POST" }),
 };
