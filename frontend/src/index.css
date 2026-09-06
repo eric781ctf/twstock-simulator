@@ -435,6 +435,135 @@ tbody tr:hover {
   font-weight: 600;
 }
 
+.model-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 16px;
+}
+
+.model-card {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  margin-bottom: 0;
+  transition: border-color 0.2s ease, transform 0.1s ease;
+}
+
+.model-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+}
+
+.model-card.archived {
+  opacity: 0.65;
+}
+
+.model-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.model-card-title {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.model-card-version {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.model-card-meta {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 12px;
+}
+
+.model-card-stats {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.model-card-stats .stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.model-card-stats .stat .label {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.model-card-stats .stat .value {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.svg-chart svg {
+  display: block;
+  max-width: 100%;
+}
+
+.svg-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 6px;
+}
+
+.svg-chart-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.svg-chart-legend i {
+  width: 10px;
+  height: 3px;
+  border-radius: 2px;
+}
+
+.warning-panel {
+  border-color: var(--buy);
+}
+
+.feature-importance-chart .bar-chart-label {
+  min-width: 150px;
+}
+
+.signed-bar-wrap {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.signed-bar-zero {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border-strong);
+}
+
+.bar-chart-fill.negative {
+  background: var(--sell);
+}
+
+.bar-chart-fill.positive {
+  background: var(--buy);
+}
+
 .feature-checkbox-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));

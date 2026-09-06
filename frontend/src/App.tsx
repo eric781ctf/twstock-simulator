@@ -4,7 +4,8 @@ import { Layout } from "./components/Layout";
 import AdminModelsPage from "./pages/AdminModelsPage";
 import AdminPage from "./pages/AdminPage";
 import LoginPage from "./pages/LoginPage";
-import PlaceholderHomePage from "./pages/PlaceholderHomePage";
+import ModelDetailPage from "./pages/ModelDetailPage";
+import ModelsPage from "./pages/ModelsPage";
 import TutorialPage from "./pages/TutorialPage";
 
 // 這個系統轉型成公開的 AI 預測模型儀表板：一般使用者不再註冊/登入，
@@ -17,7 +18,8 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route element={<Layout />}>
-            <Route path="/" element={<PlaceholderHomePage />} />
+            <Route path="/" element={<ModelsPage />} />
+            <Route path="/models/:id" element={<ModelDetailPage />} />
             <Route path="/admin" element={<AdminPage />} />
             <Route path="/admin/models" element={<AdminModelsPage />} />
             <Route path="/tutorial" element={<TutorialPage />} />

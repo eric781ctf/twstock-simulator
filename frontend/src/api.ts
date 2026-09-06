@@ -13,6 +13,7 @@ import type {
   FundamentalsHistoryPoint,
   LeaderboardEntry,
   MarketSession,
+  ModelDetail,
   ModelSummary,
   ModelTrainRequest,
   Order,
@@ -155,6 +156,9 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ target_months: targetMonths }),
     }),
+
+  getPublicModels: () => request<ModelSummary[]>("/models"),
+  getPublicModel: (id: number) => request<ModelDetail>(`/models/${id}`),
 
   getTrainDefaults: () => request<TrainDefaults>("/admin/models/train-defaults"),
   getAdminModels: () => request<ModelSummary[]>("/admin/models"),
