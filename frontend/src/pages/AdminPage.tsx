@@ -4,7 +4,7 @@ import { api } from "../api";
 import { AmountInput } from "../components/AmountInput";
 import { BarChart } from "../components/BarChart";
 import { useAuth } from "../auth/AuthContext";
-import type { AdminAccount, DailyBarStats, FeatureFlag } from "../types";
+import type { AdminAccount, BackfillStatus, DailyBarStats, FeatureFlag } from "../types";
 
 export default function AdminPage() {
   const { isAdmin } = useAuth();
@@ -17,6 +17,9 @@ export default function AdminPage() {
   const [error, setError] = useState<string | null>(null);
   const [dailyBarStats, setDailyBarStats] = useState<DailyBarStats | null>(null);
   const [featureFlags, setFeatureFlags] = useState<FeatureFlag[]>([]);
+  const [backfillStatus, setBackfillStatus] = useState<BackfillStatus | null>(null);
+  const [backfillTargetInput, setBackfillTargetInput] = useState("");
+  const [backfillBusy, setBackfillBusy] = useState(false);
 
   const refresh = useCallback(async () => {
     const res = await api.getAdminAccounts();
@@ -39,13 +42,19 @@ export default function AdminPage() {
     setFeatureFlags(res);
   }, []);
 
+  const refreshBackfillStatus = useCallback(async () => {
+    const res = await api.getBackfillStatus();
+    setBackfillStatus(res);
+  }, []);
+
   useEffect(() => {
     if (!isAdmin) return;
     refresh();
     refreshDefaultCash();
     refreshDailyBarStats();
     refreshFeatureFlags();
-  }, [isAdmin, refresh, refreshDefaultCash, refreshDailyBarStats, refreshFeatureFlags]);
+    refreshBackfillStatus();
+  }, [isAdmin, refresh, refreshDefaultCash, refreshDailyBarStats, refreshFeatureFlags, refreshBackfillStatus]);
 
   if (!isAdmin) {
     return <Navigate to="/" replace />;
@@ -111,6 +120,26 @@ export default function AdminPage() {
     }
   }
 
+  async function handleTriggerBackfill(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    const months = Number(backfillTargetInput);
+    if (!months || months <= 0) {
+      setError("請輸入有效的月數");
+      return;
+    }
+    setBackfillBusy(true);
+    try {
+      const res = await api.triggerBackfill(months);
+      setBackfillStatus(res);
+      setBackfillTargetInput("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "觸發回補失敗");
+    } finally {
+      setBackfillBusy(false);
+    }
+  }
+
   async function handleToggleFlag(flag: FeatureFlag) {
     const next = !flag.enabled;
     const action = next ? "開啟" : "關閉";
@@ -160,6 +189,33 @@ export default function AdminPage() {
       </div>
 
       {error && <div className="error-msg">{error}</div>}
+
+      <form className="panel admin-action-card" onSubmit={handleTriggerBackfill}>
+        <h2>TWSE 日K回補進度</h2>
+        <p className="order-hint">
+          目前本地上市股票日K最早回補到：
+          <span className="admin-current-value">
+            {backfillStatus ? (backfillStatus.earliest_date ?? "尚無資料") : "載入中..."}
+          </span>
+          　目前目標回補月數：
+          <span className="admin-current-value">{backfillStatus ? backfillStatus.target_months : "-"}</span>
+        </p>
+        <p className="order-hint">
+          設定新的目標月數後會在背景繼續往前補（僅 TWSE 上市，有限流保護，可能要跑一段時間）
+        </p>
+        <div className="admin-action-row">
+          <input
+            type="number"
+            min={1}
+            placeholder="目標月數"
+            value={backfillTargetInput}
+            onChange={(e) => setBackfillTargetInput(e.target.value)}
+          />
+          <button className="submit" type="submit" disabled={backfillBusy}>
+            {backfillBusy ? "觸發中..." : "繼續回補"}
+          </button>
+        </div>
+      </form>
 
       <div className="stats-section">
         <div className="panel">

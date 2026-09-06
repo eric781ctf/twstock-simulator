@@ -28,3 +28,19 @@ def set_default_initial_cash(db: Session, amount: float) -> float:
         row.default_initial_cash = amount
     db.commit()
     return float(row.default_initial_cash)
+
+
+def get_target_backfill_months(db: Session) -> int:
+    row = db.get(AppConfig, _ROW_ID)
+    return row.target_backfill_months if row else 3
+
+
+def set_target_backfill_months(db: Session, months: int) -> int:
+    row = db.get(AppConfig, _ROW_ID)
+    if row is None:
+        row = AppConfig(id=_ROW_ID, default_initial_cash=settings.initial_cash, target_backfill_months=months)
+        db.add(row)
+    else:
+        row.target_backfill_months = months
+    db.commit()
+    return row.target_backfill_months

@@ -124,6 +124,11 @@ export interface DailyBarStats {
   tpex: DailyBarMarketStats;
 }
 
+export interface BackfillStatus {
+  earliest_date: string | null;
+  target_months: number;
+}
+
 export interface FeatureFlag {
   key: string;
   label: string;

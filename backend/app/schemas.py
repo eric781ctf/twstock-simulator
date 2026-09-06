@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -133,6 +133,15 @@ class DailyBarMarketStatsOut(BaseModel):
 class DailyBarStatsOut(BaseModel):
     twse: DailyBarMarketStatsOut
     tpex: DailyBarMarketStatsOut
+
+
+class BackfillStatusOut(BaseModel):
+    earliest_date: date | None
+    target_months: int
+
+
+class BackfillTargetIn(BaseModel):
+    target_months: int = Field(gt=0, le=120)
 
 
 class FeatureFlagOut(BaseModel):

@@ -2,32 +2,21 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider } from "./auth/AuthContext";
 import { Layout } from "./components/Layout";
 import AdminPage from "./pages/AdminPage";
-import HomePage from "./pages/HomePage";
-import LeaderboardPage from "./pages/LeaderboardPage";
 import LoginPage from "./pages/LoginPage";
-import PositionPage from "./pages/PositionPage";
-import RegisterPage from "./pages/RegisterPage";
-import SearchPage from "./pages/SearchPage";
-import StrategyPage from "./pages/StrategyPage";
-import TradeHistoryPage from "./pages/TradeHistoryPage";
-import TradePage from "./pages/TradePage";
+import PlaceholderHomePage from "./pages/PlaceholderHomePage";
 import TutorialPage from "./pages/TutorialPage";
 
+// 這個系統轉型成公開的 AI 預測模型儀表板：一般使用者不再註冊/登入，
+// 只有 admin 需要登入來訓練/管理模型。舊的一般使用者頁面（手動交易、
+// 自選股、排行榜、個人策略）程式碼還在，只是不再掛路由對外開放。
 export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
           <Route element={<Layout />}>
-            <Route path="/" element={<HomePage />} />
-            <Route path="/trade" element={<TradePage />} />
-            <Route path="/search" element={<SearchPage />} />
-            <Route path="/history" element={<TradeHistoryPage />} />
-            <Route path="/positions" element={<PositionPage />} />
-            <Route path="/strategy" element={<StrategyPage />} />
-            <Route path="/leaderboard" element={<LeaderboardPage />} />
+            <Route path="/" element={<PlaceholderHomePage />} />
             <Route path="/admin" element={<AdminPage />} />
             <Route path="/tutorial" element={<TutorialPage />} />
           </Route>

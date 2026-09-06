@@ -2,6 +2,7 @@ import type {
   Account,
   AdminAccount,
   AuthResponse,
+  BackfillStatus,
   DailyBar,
   DailyBarStats,
   FeatureFlag,
@@ -138,4 +139,11 @@ export const api = {
   setFeatureFlag: (key: string, enabled: boolean) =>
     request<FeatureFlag>(`/admin/feature-flags/${key}`, { method: "POST", body: JSON.stringify({ enabled }) }),
   getDailyBarStats: () => request<DailyBarStats>("/admin/daily-bar-stats"),
+
+  getBackfillStatus: () => request<BackfillStatus>("/admin/models/backfill-status"),
+  triggerBackfill: (targetMonths: number) =>
+    request<BackfillStatus>("/admin/models/backfill", {
+      method: "POST",
+      body: JSON.stringify({ target_months: targetMonths }),
+    }),
 };

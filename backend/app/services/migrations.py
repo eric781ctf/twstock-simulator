@@ -20,4 +20,7 @@ def run_lightweight_migrations(engine: Engine) -> None:
         conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_type VARCHAR(10) NOT NULL DEFAULT 'limit'"))
         conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS stop_price NUMERIC(18, 4)"))
         conn.execute(text("ALTER TABLE trades ADD COLUMN IF NOT EXISTS realized_pnl NUMERIC(18, 4)"))
+        conn.execute(
+            text("ALTER TABLE app_config ADD COLUMN IF NOT EXISTS target_backfill_months INTEGER NOT NULL DEFAULT 3")
+        )
     logger.info("run_lightweight_migrations 完成")

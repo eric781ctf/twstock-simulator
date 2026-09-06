@@ -59,6 +59,7 @@ class AppConfig(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     default_initial_cash: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False)
+    target_backfill_months: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
 
 
 class FeatureFlag(Base):

@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 
 export default function LoginPage() {
@@ -27,8 +27,8 @@ export default function LoginPage() {
   return (
     <div className="auth-page">
       <form className="auth-card page-transition" onSubmit={handleSubmit}>
-        <h1>台股模擬交易系統</h1>
-        <p className="auth-subtitle">登入你的模擬帳戶</p>
+        <h1>台股 AI 預測模型系統</h1>
+        <p className="auth-subtitle">管理員登入</p>
         <input placeholder="帳號" value={username} onChange={(e) => setUsername(e.target.value)} autoFocus />
         <input
           type="password"
@@ -40,9 +40,6 @@ export default function LoginPage() {
         <button className="submit" type="submit" disabled={submitting}>
           {submitting ? "登入中..." : "登入"}
         </button>
-        <p className="auth-switch">
-          還沒有帳號？<Link to="/register">註冊新帳戶</Link>
-        </p>
       </form>
     </div>
   );
