@@ -135,6 +135,15 @@ class DailyBarStatsOut(BaseModel):
     tpex: DailyBarMarketStatsOut
 
 
+class BackfillStatusOut(BaseModel):
+    earliest_date: date | None
+    target_months: int
+
+
+class BackfillTargetIn(BaseModel):
+    target_months: int = Field(gt=0, le=120)
+
+
 class FeatureFlagOut(BaseModel):
     key: str
     label: str

@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { NavLink, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 
+// 這個系統不再有一般使用者帳號，只有 admin 需要登入來訓練/管理模型。
+// 所有公開頁面（模型列表、股市教學）不需要登入即可瀏覽，admin 登入後
+// 一樣可以逛公開頁面，不會被鎖在管理後台裡出不來。
 export function Layout() {
   const { isAuthenticated, nickname, username, isAdmin, logout } = useAuth();
   const navigate = useNavigate();
@@ -23,73 +26,48 @@ export function Layout() {
     setMenuOpen(false);
   }, [location.pathname]);
 
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
-  }
-
-  // 管理員帳號只提供管理後台，沒有其他一般使用者的頁面可以逛。
-  if (isAdmin && location.pathname !== "/admin") {
-    return <Navigate to="/admin" replace />;
-  }
-
   function handleLogout() {
     setMenuOpen(false);
     logout();
-    navigate("/login");
-  }
-
-  function handleLeaderboard() {
-    setMenuOpen(false);
-    navigate("/leaderboard");
+    navigate("/");
   }
 
   return (
     <>
       <header className="app-header">
-        <h1>台股模擬交易系統</h1>
+        <h1>台股 AI 預測模型系統</h1>
       </header>
       <nav className="navbar">
         <div className="nav-links">
-          {isAdmin ? (
+          <NavLink to="/" end className={({ isActive }) => (isActive ? "active" : "")}>
+            模型列表
+          </NavLink>
+          <NavLink to="/tutorial" className={({ isActive }) => (isActive ? "active" : "")}>
+            股市教學
+          </NavLink>
+          {isAdmin && (
             <NavLink to="/admin" className={({ isActive }) => (isActive ? "active" : "")}>
               管理後台
             </NavLink>
-          ) : (
-            <>
-              <NavLink to="/" end className={({ isActive }) => (isActive ? "active" : "")}>
-                首頁
-              </NavLink>
-              <NavLink to="/search" className={({ isActive }) => (isActive ? "active" : "")}>
-                搜尋
-              </NavLink>
-              <NavLink to="/trade" className={({ isActive }) => (isActive ? "active" : "")}>
-                交易
-              </NavLink>
-              <NavLink to="/history" className={({ isActive }) => (isActive ? "active" : "")}>
-                交易紀錄
-              </NavLink>
-              <NavLink to="/positions" className={({ isActive }) => (isActive ? "active" : "")}>
-                部位
-              </NavLink>
-              <NavLink to="/strategy" className={({ isActive }) => (isActive ? "active" : "")}>
-                策略
-              </NavLink>
-              <NavLink to="/tutorial" className={({ isActive }) => (isActive ? "active" : "")}>
-                股市教學
-              </NavLink>
-            </>
           )}
         </div>
         <div className="nav-user" ref={menuRef}>
-          <button className="nav-user-btn" onClick={() => setMenuOpen((open) => !open)}>
-            {nickname ?? username}
-            <span className={`nav-user-caret ${menuOpen ? "open" : ""}`}>▾</span>
-          </button>
-          {menuOpen && (
-            <div className="nav-user-menu">
-              {!isAdmin && <button onClick={handleLeaderboard}>排行榜</button>}
-              <button className="danger" onClick={handleLogout}>登出</button>
-            </div>
+          {isAuthenticated ? (
+            <>
+              <button className="nav-user-btn" onClick={() => setMenuOpen((open) => !open)}>
+                {nickname ?? username}
+                <span className={`nav-user-caret ${menuOpen ? "open" : ""}`}>▾</span>
+              </button>
+              {menuOpen && (
+                <div className="nav-user-menu">
+                  <button className="danger" onClick={handleLogout}>登出</button>
+                </div>
+              )}
+            </>
+          ) : (
+            <Link to="/login" className="nav-user-btn">
+              管理員登入
+            </Link>
           )}
         </div>
       </nav>

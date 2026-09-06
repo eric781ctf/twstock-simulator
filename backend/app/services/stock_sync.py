@@ -277,6 +277,18 @@ def _bucketize_bar_counts(counts: list[int]) -> list[dict]:
     return [{"label": label, "count": bucket_counts[label]} for _, _, label in _BAR_COUNT_BUCKETS]
 
 
+def get_twse_earliest_bar_date(db: Session) -> date | None:
+    """目前 TWSE 上市股票本地日K回補到多早——用來讓 admin 判斷「要不要繼續往前補」。
+    只看 TWSE，因為 TPEx 沒有回補機制、興櫃根本不在系統範圍內。"""
+    row = (
+        db.query(func.min(DailyBar.trade_date))
+        .join(Stock, Stock.code == DailyBar.stock_code)
+        .filter(Stock.market == Market.TWSE)
+        .scalar()
+    )
+    return row
+
+
 def get_daily_bar_stats(db: Session) -> dict:
     """給管理後台看的資料完整度統計：每個市場有幾檔股票、日K筆數落在哪個
     區間、有幾檔已經達到「足夠」（>= DAILY_BAR_MIN_BARS）的門檻。TWSE 的

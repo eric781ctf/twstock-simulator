@@ -1,23 +1,48 @@
+import asyncio
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.models import User
 from app.schemas import (
     AdminAccountOut,
     AdminAmountIn,
+    BackfillStatusOut,
+    BackfillTargetIn,
     DailyBarStatsOut,
     DefaultInitialCashOut,
     FeatureFlagOut,
     FeatureFlagUpdateIn,
 )
 from app.services.admin import AdminActionError, add_cash_to_all, delete_account, freeze_account, list_all_accounts
-from app.services.app_config import get_default_initial_cash, set_default_initial_cash
+from app.services.app_config import (
+    get_default_initial_cash,
+    get_target_backfill_months,
+    set_default_initial_cash,
+    set_target_backfill_months,
+)
 from app.services.auth import require_admin
 from app.services.feature_flags import FLAG_LABELS, get_all_flags, set_flag
-from app.services.stock_sync import get_daily_bar_stats
+from app.services.stock_sync import backfill_all_twse_daily_bars, get_daily_bar_stats, get_twse_earliest_bar_date
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+async def _run_backfill_task(months: int) -> None:
+    """admin 手動觸發的回補，跟開機時的背景回補用同一支函式，只是換一個更大的
+    months 目標——`backfill_all_twse_daily_bars` 本來就是「從今天回推 N 個月」，
+    調大目標自然會把還不夠深的股票往更早的月份補。"""
+    db = SessionLocal()
+    try:
+        await backfill_all_twse_daily_bars(db, months=months)
+    except Exception:
+        logger.exception("手動觸發的日K回補發生錯誤")
+    finally:
+        db.close()
 
 
 @router.get("/accounts", response_model=list[AdminAccountOut])
@@ -77,6 +102,21 @@ def freeze(user_id: int, db: Session = Depends(get_db), _: User = Depends(requir
 def get_daily_bar_stats_endpoint(db: Session = Depends(get_db), _: User = Depends(require_admin)):
     stats = get_daily_bar_stats(db)
     return DailyBarStatsOut(**stats)
+
+
+@router.get("/models/backfill-status", response_model=BackfillStatusOut)
+def get_backfill_status(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    return BackfillStatusOut(
+        earliest_date=get_twse_earliest_bar_date(db),
+        target_months=get_target_backfill_months(db),
+    )
+
+
+@router.post("/models/backfill", response_model=BackfillStatusOut)
+async def trigger_backfill(payload: BackfillTargetIn, db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    months = set_target_backfill_months(db, payload.target_months)
+    asyncio.create_task(_run_backfill_task(months))
+    return BackfillStatusOut(earliest_date=get_twse_earliest_bar_date(db), target_months=months)
 
 
 @router.get("/feature-flags", response_model=list[FeatureFlagOut])
