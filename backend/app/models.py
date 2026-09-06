@@ -233,6 +233,24 @@ class StrategyTrade(Base):
     stock: Mapped["Stock"] = relationship()
 
 
+class EquitySnapshot(Base):
+    """帳戶每日績效快照（現金、部位市值、總資產），給「績效走勢圖」用。刻意
+    只在每日排程（見 services/equity.py）用 daily_bars 的收盤價計算，不即時
+    打報價 API——這樣使用者的績效歷史用不到額外的 API 額度，跟市價單共用
+    quote_cache 的節流精神一致。同一帳戶同一天只會有一筆（見 unique
+    constraint），排程重跑會直接覆蓋更新，不會重複累積。"""
+
+    __tablename__ = "equity_snapshots"
+    __table_args__ = (UniqueConstraint("account_id", "snapshot_date", name="uq_equity_snapshot_account_date"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), nullable=False)
+    snapshot_date: Mapped[date] = mapped_column(Date, nullable=False)
+    cash_balance: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False)
+    market_value: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False)
+    total_assets: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False)
+
+
 class WatchlistItem(Base):
     """使用者自選股清單，每個帳戶最多 20 檔。清單內的股票會被排入每日分時資料
     的追蹤範圍（見 matching.run_matching_cycle），並顯示在該使用者首頁。"""

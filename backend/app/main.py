@@ -24,6 +24,7 @@ from app.routers import (
 )
 from app.services.admin import ensure_admin_user
 from app.services.app_config import ensure_app_config
+from app.services.equity import snapshot_all_accounts_equity
 from app.services.feature_flags import SCHEDULER_DAILY_BAR_BACKFILL, ensure_feature_flags, is_enabled
 from app.services.migrations import run_lightweight_migrations
 from app.services.scheduler import start_scheduler, stop_scheduler
@@ -74,6 +75,7 @@ async def lifespan(app: FastAPI):
         if count == 0:
             logger.warning("啟動時股票清單同步失敗或無資料，將於背景排程重試")
         await sync_valuations(db)
+        snapshot_all_accounts_equity(db)
     finally:
         db.close()
 

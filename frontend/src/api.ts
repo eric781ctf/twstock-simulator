@@ -2,8 +2,11 @@ import type {
   Account,
   AdminAccount,
   AuthResponse,
+  BacktestRequest,
+  BacktestResult,
   DailyBar,
   DailyBarStats,
+  EquitySnapshot,
   FeatureFlag,
   Fundamentals,
   FundamentalsHistoryPoint,
@@ -66,6 +69,7 @@ export const api = {
     request<AuthResponse>("/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }),
 
   getAccount: () => request<Account>("/account"),
+  getEquityHistory: (days = 180) => request<EquitySnapshot[]>(`/account/equity-history?days=${days}`),
   searchStocks: (query: string) => request<Stock[]>(`/stocks?query=${encodeURIComponent(query)}`),
   getQuote: (code: string) => request<Quote>(`/stocks/${code}/quote`),
   getDailyHistory: (code: string, months = 3) =>
@@ -132,6 +136,8 @@ export const api = {
   activateStrategy: (id: number) => request<Strategy>(`/strategies/${id}/activate`, { method: "POST" }),
   deactivateStrategy: (id: number) => request<Strategy>(`/strategies/${id}/deactivate`, { method: "POST" }),
   getStrategyTrades: (id: number) => request<StrategyTradeRecord[]>(`/strategies/${id}/trades`),
+  backtestStrategy: (id: number, payload: BacktestRequest) =>
+    request<BacktestResult>(`/strategies/${id}/backtest`, { method: "POST", body: JSON.stringify(payload) }),
 
   getFeatureFlags: () => request<Record<string, boolean>>("/feature-flags"),
   getAdminFeatureFlags: () => request<FeatureFlag[]>("/admin/feature-flags"),
