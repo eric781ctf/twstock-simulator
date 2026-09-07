@@ -275,8 +275,8 @@ class PredictionModel(Base):
     n_days: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
     threshold_percent: Mapped[float] = mapped_column(Float, nullable=False, default=3.0)
 
-    # 選股分數：multiply = 預期報酬 × 機率；zscore_weighted = 兩者各自標準化後加權平均
-    score_formula: Mapped[str] = mapped_column(String(20), nullable=False, default="multiply")
+    # 選股分數一律用橫斷面標準化加權（見 services/ml/train.py 的 SCORE_FORMULA_INFO）
+    score_formula: Mapped[str] = mapped_column(String(20), nullable=False, default="zscore_weighted")
     score_weights: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     # 出場規則（四層，依序判斷，見 services/ml/exit_rules.py）

@@ -18,13 +18,14 @@ from app.schemas import (
     ModelSummaryOut,
     ModelTrainRequest,
     ModelTypeOptionOut,
+    ScoreFormulaInfoOut,
     TrainDefaultsOut,
 )
 from app.services.auth import require_admin
 from app.services.ml.features import DEFAULT_FEATURES, FEATURE_KEYS, FEATURE_LABELS
 from app.services.ml.inference import latest_bar_date
 from app.services.ml.performance import summarize_holdings
-from app.services.ml.train import MODEL_TYPE_LABELS, MODEL_TYPES
+from app.services.ml.train import MODEL_TYPE_LABELS, MODEL_TYPES, SCORE_FORMULA_INFO, SCORE_FORMULA_KEY
 from app.services.ml.training_runner import run_training_job, suggest_split_dates
 from app.services.strategy_conditions import ConditionValidationError, validate_conditions
 
@@ -42,6 +43,7 @@ def get_train_defaults(db: Session = Depends(get_db), _: User = Depends(require_
         default_features=DEFAULT_FEATURES,
         features=[FeatureOptionOut(key=key, label=FEATURE_LABELS[key]) for key in FEATURE_KEYS],
         model_types=[ModelTypeOptionOut(key=key, label=MODEL_TYPE_LABELS[key]) for key in MODEL_TYPES],
+        score_formula=ScoreFormulaInfoOut(**SCORE_FORMULA_INFO),
     )
 
 
@@ -100,7 +102,7 @@ async def create_model(
         feature_config=payload.feature_config,
         n_days=payload.n_days,
         threshold_percent=payload.threshold_percent,
-        score_formula=payload.score_formula,
+        score_formula=SCORE_FORMULA_KEY,
         score_weights=payload.score_weights,
         min_hold_days=payload.min_hold_days,
         max_hold_days=payload.max_hold_days,

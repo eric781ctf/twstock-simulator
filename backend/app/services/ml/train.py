@@ -191,29 +191,49 @@ def train_dual_task(
     return regressor, classifier, metrics
 
 
+SCORE_FORMULA_KEY = "zscore_weighted"
+
+# 選股分數的公式與說明放在實作旁邊，改公式時不會忘記同步改說明；
+# 前端（admin 表單與公開詳情頁）直接拿這份資料顯示，不各自抄一份。
+SCORE_FORMULA_INFO: dict = {
+    "key": SCORE_FORMULA_KEY,
+    "name": "橫斷面標準化加權",
+    "formula": "分數 = w₁ × z(預期報酬) + w₂ × z(達標機率)",
+    "definition": "z(x) = ( x − 當日全市場平均 ) ÷ 當日全市場標準差",
+    "summary": "把兩個模型輸出各自換算成「相對於當天全市場的位置」，再依權重相加，取分數最高的前 10 名。",
+    "reasons": [
+        "兩個輸出的單位天差地遠：預期報酬是百分比（可能 -10 到 +10），達標機率是 0 到 1。"
+        "不先換算就相乘或相加，等於讓其中一邊主導整個排名。",
+        "標準化的基準是「當天的全市場」，比的是這檔股票今天相對於其他股票的位置，"
+        "所以大盤整體大漲或大跌的日子不會讓所有股票的分數一起被推高或壓低。",
+        "只用到兩個輸出的相對高低，不依賴機率的絕對數值正確——"
+        "模型說「85%」時實際未必真有 85%，但「這檔比那檔更看好」通常還是成立的。",
+    ],
+    "limitation": "標準化是線性轉換，會保留原本的排序。"
+    "如果模型在某個信心區間的排序本身就是錯的（例如最有把握的那批反而表現最差），"
+    "換這個公式並不會修正它——請搭配下方的機率校準曲線一起看。",
+}
+
+
 def compute_scores(
     predicted_returns: np.ndarray,
     probabilities: np.ndarray,
-    score_formula: str,
     score_weights: dict | None,
 ) -> np.ndarray:
-    """把雙任務的兩個輸出合成一個排名分數。
+    """把雙任務的兩個輸出合成一個排名分數（橫斷面標準化後加權平均）。
 
-    - multiply：預期報酬 × 機率，直覺、接近期望值，但沒有校正兩者的尺度。
-    - zscore_weighted：兩邊各自做橫斷面標準化（同一天全市場一起比）再加權平均，
-      這是機構多因子模型合成訊號的標準做法，比較不受單邊尺度失真影響。
+    這是機構多因子模型合成訊號的標準做法。先前也提供過「預期報酬 × 機率」的
+    簡單版，但那個寫法會把虛高的機率直接乘進去放大——而機率恰好是這類模型
+    最不可靠的部分，所以不再提供。
     """
-    if score_formula == "zscore_weighted":
-        weights = score_weights or {}
-        w_return = float(weights.get("return", 0.5))
-        w_probability = float(weights.get("probability", 0.5))
+    weights = score_weights or {}
+    w_return = float(weights.get("return", 0.5))
+    w_probability = float(weights.get("probability", 0.5))
 
-        def zscore(values: np.ndarray) -> np.ndarray:
-            std = float(np.std(values))
-            if std < 1e-9:
-                return np.zeros_like(values)
-            return (values - float(np.mean(values))) / std
+    def zscore(values: np.ndarray) -> np.ndarray:
+        std = float(np.std(values))
+        if std < 1e-9:
+            return np.zeros_like(values)  # 當天所有股票的預測都一樣，給 0 就好
+        return (values - float(np.mean(values))) / std
 
-        return w_return * zscore(predicted_returns) + w_probability * zscore(probabilities)
-
-    return predicted_returns * probabilities
+    return w_return * zscore(predicted_returns) + w_probability * zscore(probabilities)

@@ -2,19 +2,15 @@ import { useCallback, useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { api } from "../api";
 import { ConditionEditor } from "../components/ConditionEditor";
+import { ScoreFormulaExplainer } from "../components/ScoreFormulaExplainer";
 import { useAuth } from "../auth/AuthContext";
-import type { Condition, ModelSummary, ModelTrainRequest, ModelType, ScoreFormula, TrainDefaults } from "../types";
+import type { Condition, ModelSummary, ModelTrainRequest, ModelType, TrainDefaults } from "../types";
 
 const STATUS_LABEL: Record<ModelSummary["status"], string> = {
   queued: "排隊中",
   training: "訓練中",
   completed: "已完成",
   failed: "失敗",
-};
-
-const SCORE_FORMULA_LABEL: Record<ScoreFormula, string> = {
-  multiply: "預期報酬 × 機率",
-  zscore_weighted: "標準化後加權平均",
 };
 
 // 訓練中的版本要持續看狀態，但訓練動輒數十秒到數分鐘，五分鐘輪詢一次就夠
@@ -46,7 +42,6 @@ export default function AdminModelsPage() {
   const [features, setFeatures] = useState<string[]>([]);
   const [nDays, setNDays] = useState("5");
   const [threshold, setThreshold] = useState("3");
-  const [scoreFormula, setScoreFormula] = useState<ScoreFormula>("multiply");
   const [returnWeight, setReturnWeight] = useState("0.5");
   const [probabilityWeight, setProbabilityWeight] = useState("0.5");
   const [minHold, setMinHold] = useState("2");
@@ -127,11 +122,7 @@ export default function AdminModelsPage() {
       feature_config: features,
       n_days: Number(nDays),
       threshold_percent: Number(threshold),
-      score_formula: scoreFormula,
-      score_weights:
-        scoreFormula === "zscore_weighted"
-          ? { return: Number(returnWeight), probability: Number(probabilityWeight) }
-          : null,
+      score_weights: { return: Number(returnWeight), probability: Number(probabilityWeight) },
       min_hold_days: optionalNumber(minHold),
       max_hold_days: optionalNumber(maxHold),
       stop_loss_percent: optionalNumber(stopLoss),
@@ -209,33 +200,25 @@ export default function AdminModelsPage() {
               <input type="number" step="0.1" value={threshold} onChange={(e) => setThreshold(e.target.value)} />
             </label>
             <label>
-              選股分數公式
-              <select value={scoreFormula} onChange={(e) => setScoreFormula(e.target.value as ScoreFormula)}>
-                {(Object.keys(SCORE_FORMULA_LABEL) as ScoreFormula[]).map((k) => (
-                  <option key={k} value={k}>
-                    {SCORE_FORMULA_LABEL[k]}
-                  </option>
-                ))}
-              </select>
+              預期報酬權重 w₁
+              <input type="number" step="0.1" value={returnWeight} onChange={(e) => setReturnWeight(e.target.value)} />
             </label>
-            {scoreFormula === "zscore_weighted" && (
-              <>
-                <label>
-                  預期報酬權重
-                  <input type="number" step="0.1" value={returnWeight} onChange={(e) => setReturnWeight(e.target.value)} />
-                </label>
-                <label>
-                  達標機率權重
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={probabilityWeight}
-                    onChange={(e) => setProbabilityWeight(e.target.value)}
-                  />
-                </label>
-              </>
-            )}
+            <label>
+              達標機率權重 w₂
+              <input
+                type="number"
+                step="0.1"
+                value={probabilityWeight}
+                onChange={(e) => setProbabilityWeight(e.target.value)}
+              />
+            </label>
           </div>
+
+          <h3 className="tutorial-heading">選股分數怎麼算</h3>
+          <ScoreFormulaExplainer
+            info={defaults.score_formula}
+            weights={{ return: Number(returnWeight), probability: Number(probabilityWeight) }}
+          />
 
           <h3 className="tutorial-heading">訓練特徵（已勾選 {features.length} 項）</h3>
           <div className="feature-checkbox-grid">

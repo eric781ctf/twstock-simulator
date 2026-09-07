@@ -5,6 +5,7 @@ import { CalibrationChart } from "../components/CalibrationChart";
 import { FeatureImportanceChart } from "../components/FeatureImportanceChart";
 import { PredictionScatterChart } from "../components/PredictionScatterChart";
 import { ReturnScatterChart } from "../components/ReturnScatterChart";
+import { ScoreFormulaExplainer } from "../components/ScoreFormulaExplainer";
 import type { ModelDetail, ModelHoldingItem } from "../types";
 
 const EXIT_REASON_LABEL: Record<string, string> = {
@@ -13,11 +14,6 @@ const EXIT_REASON_LABEL: Record<string, string> = {
   take_profit: "停利",
   max_hold_days: "持有到期",
   backtest_end: "回測結束平倉",
-};
-
-const SCORE_FORMULA_LABEL: Record<string, string> = {
-  multiply: "預期報酬 × 機率",
-  zscore_weighted: "標準化後加權平均",
 };
 
 function pct(value: number | null | undefined): string {
@@ -196,6 +192,14 @@ export default function ModelDetailPage() {
         />
       </div>
 
+      <h2 className="section-title">選股分數怎麼算</h2>
+      <div className="panel">
+        <p className="order-hint">
+          每個交易日收盤後，模型會對全部上市股票各算一個分數，取最高的前 10 名買進。
+        </p>
+        <ScoreFormulaExplainer info={detail.score_formula_info} weights={detail.score_weights} />
+      </div>
+
       <h2 className="section-title">模型準確度</h2>
       <div className="panel">
         <h3 className="tutorial-heading">迴歸：預測報酬率 vs 實際報酬率</h3>
@@ -251,11 +255,6 @@ export default function ModelDetailPage() {
           </div>
           <div>
             <span className="label">預測目標</span> 未來 {summary.n_days} 個交易日報酬率，以及是否超過 {summary.threshold_percent}%
-          </div>
-          <div>
-            <span className="label">選股分數</span> {SCORE_FORMULA_LABEL[summary.score_formula] ?? summary.score_formula}
-            {detail.score_weights &&
-              `（報酬權重 ${detail.score_weights.return}、機率權重 ${detail.score_weights.probability}）`}
           </div>
           <div>
             <span className="label">訓練特徵</span> {detail.feature_labels.join("、")}
