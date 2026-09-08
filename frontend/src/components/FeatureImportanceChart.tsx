@@ -17,6 +17,11 @@ export function FeatureImportanceChart({ items, emptyText = "尚無資料", sign
 
   const sorted = [...items].sort((a, b) => Math.abs(b.importance) - Math.abs(a.importance));
   const max = Math.max(...sorted.map((i) => Math.abs(i.importance)), 1e-9);
+  // 各種模型給的重要性量級差很多：樹模型的 gain 可能是幾百，神經網路第一層的
+  // 權重平均是 0.x，線性模型的係數又更小。固定小數位一定有一邊會被顯示成 0，
+  // 所以位數由這組數字裡最大的那個決定。
+  const decimals = max >= 100 ? 0 : max >= 10 ? 1 : max >= 1 ? 2 : max >= 0.01 ? 3 : 5;
+  const format = (value: number) => value.toFixed(decimals);
 
   return (
     <div className="bar-chart feature-importance-chart">
@@ -44,7 +49,7 @@ export function FeatureImportanceChart({ items, emptyText = "尚無資料", sign
                 <div className="bar-chart-fill" style={{ width: `${ratio * 100}%` }} />
               )}
             </div>
-            <span className="bar-chart-count">{item.importance.toFixed(signed ? 3 : 0)}</span>
+            <span className="bar-chart-count">{format(item.importance)}</span>
           </div>
         );
       })}

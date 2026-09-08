@@ -107,6 +107,7 @@ def _train_sync(model_id: int) -> dict:
             x_validation,
             y_validation_reg,
             y_validation_clf,
+            network_config=model.network_config,
         )
 
         artifact_path = artifacts.save_bundle(

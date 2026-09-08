@@ -20,6 +20,7 @@ from app.schemas import (
     ModelHoldingOut,
     ModelPredictionPointOut,
     ModelSummaryOut,
+    NetworkInfoOut,
     ScoreFormulaInfoOut,
     ScoringRunOut,
 )
@@ -219,6 +220,7 @@ def get_public_model(model_id: int, db: Session = Depends(get_db)):
         test_end=model.test_end,
         metrics=metrics,
         warnings=metrics.get("warnings", []),
+        network=NetworkInfoOut(**metrics["network"]) if metrics.get("network") else None,
         regression_points=regression_points,
         calibration_buckets=_calibration(predictions),
         backtest_trades=backtest_trades,

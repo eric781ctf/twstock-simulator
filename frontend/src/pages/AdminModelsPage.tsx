@@ -4,7 +4,8 @@ import { api } from "../api";
 import { ConditionEditor } from "../components/ConditionEditor";
 import { ScoreFormulaExplainer } from "../components/ScoreFormulaExplainer";
 import { useAuth } from "../auth/AuthContext";
-import type { Condition, ModelSummary, ModelTrainRequest, ModelType, TrainDefaults } from "../types";
+import type { Activation, Condition, ModelSummary, ModelTrainRequest, ModelType, TrainDefaults } from "../types";
+
 
 const STATUS_LABEL: Record<ModelSummary["status"], string> = {
   queued: "排隊中",
@@ -49,6 +50,11 @@ export default function AdminModelsPage() {
   const [stopLoss, setStopLoss] = useState("5");
   const [takeProfit, setTakeProfit] = useState("8");
   const [sellConditions, setSellConditions] = useState<Condition[]>([]);
+  const [hiddenSizes, setHiddenSizes] = useState("64, 32");
+  const [activation, setActivation] = useState<Activation>("relu");
+  const [dropout, setDropout] = useState("0.2");
+  const [learningRate, setLearningRate] = useState("0.001");
+  const [epochs, setEpochs] = useState("60");
   const [dates, setDates] = useState({
     train_start: "",
     train_end: "",
@@ -115,6 +121,10 @@ export default function AdminModelsPage() {
       setError("至少要勾選一項特徵");
       return;
     }
+    if (isNeural && parsedHiddenSizes.length === 0) {
+      setError("請輸入每層的神經元數，例如 64, 32");
+      return;
+    }
 
     const payload: ModelTrainRequest = {
       model_family: family.trim(),
@@ -123,6 +133,15 @@ export default function AdminModelsPage() {
       n_days: Number(nDays),
       threshold_percent: Number(threshold),
       score_weights: { return: Number(returnWeight), probability: Number(probabilityWeight) },
+      network_config: isNeural
+        ? {
+            hidden_sizes: parsedHiddenSizes,
+            activation,
+            dropout: Number(dropout),
+            learning_rate: Number(learningRate),
+            epochs: Number(epochs),
+          }
+        : null,
       min_hold_days: optionalNumber(minHold),
       max_hold_days: optionalNumber(maxHold),
       stop_loss_percent: optionalNumber(stopLoss),
@@ -155,6 +174,13 @@ export default function AdminModelsPage() {
       alert(err instanceof Error ? err.message : "操作失敗");
     }
   }
+
+  // 哪些類型算神經網路由後端決定，前端不自己維護一份清單
+  const isNeural = defaults?.model_types.find((t) => t.key === modelType)?.is_neural ?? false;
+  const parsedHiddenSizes = hiddenSizes
+    .split(/[,\s]+/)
+    .map((v) => Number(v.trim()))
+    .filter((v) => Number.isFinite(v) && v > 0);
 
   const hasRunning = models.some((m) => m.status === "queued" || m.status === "training");
 
@@ -213,6 +239,52 @@ export default function AdminModelsPage() {
               />
             </label>
           </div>
+
+          {isNeural && (
+            <>
+              <h3 className="tutorial-heading">網路結構</h3>
+              <p className="order-hint">
+                只有神經網路類型有「層」的概念（樹模型是一堆決策樹的集成，沒有層）。
+                這裡設定的是共享 encoder 的結構——兩個輸出頭（預期報酬、達標機率）會接在最後一層之後，
+                共用同一組隱藏層一起訓練。訓練一律使用 GPU，沒有可用的 GPU 會直接失敗。
+              </p>
+              <div className="strategy-form-grid">
+                <label>
+                  每層神經元數（用逗號分隔）
+                  <input
+                    placeholder="64, 32"
+                    value={hiddenSizes}
+                    onChange={(e) => setHiddenSizes(e.target.value)}
+                  />
+                </label>
+                <label>
+                  啟用函數
+                  <select value={activation} onChange={(e) => setActivation(e.target.value as Activation)}>
+                    <option value="relu">ReLU</option>
+                    <option value="tanh">Tanh</option>
+                    <option value="gelu">GELU</option>
+                  </select>
+                </label>
+                <label>
+                  Dropout
+                  <input type="number" step="0.05" min={0} max={0.9} value={dropout} onChange={(e) => setDropout(e.target.value)} />
+                </label>
+                <label>
+                  學習率
+                  <input type="number" step="0.0001" value={learningRate} onChange={(e) => setLearningRate(e.target.value)} />
+                </label>
+                <label>
+                  訓練輪數 epochs
+                  <input type="number" min={1} max={1000} value={epochs} onChange={(e) => setEpochs(e.target.value)} />
+                </label>
+              </div>
+              {parsedHiddenSizes.length > 0 && (
+                <p className="order-hint network-preview">
+                  結構預覽：{features.length} 個特徵 → {parsedHiddenSizes.join(" → ")} → 兩個輸出頭（迴歸 1、分類 1）
+                </p>
+              )}
+            </>
+          )}
 
           <h3 className="tutorial-heading">選股分數怎麼算</h3>
           <ScoreFormulaExplainer

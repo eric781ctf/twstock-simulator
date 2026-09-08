@@ -171,6 +171,50 @@ class FeatureOptionOut(BaseModel):
 class ModelTypeOptionOut(BaseModel):
     key: str
     label: str
+    # 有「層」這個概念、需要 GPU 的類型；前端據此決定要不要顯示網路結構設定
+    is_neural: bool
+
+
+class NetworkLayerOut(BaseModel):
+    """網路的一層，欄位刻意對齊 Keras model.summary() 的呈現方式。"""
+
+    name: str
+    type: str
+    output_shape: str
+    params: int
+
+
+class LossCurvePointOut(BaseModel):
+    epoch: int
+    train_loss: float
+    validation_loss: float
+
+
+class NetworkInfoOut(BaseModel):
+    layers: list[NetworkLayerOut]
+    total_params: int
+    loss_curve: list[LossCurvePointOut]
+    device: str
+    epochs: int
+    hidden_sizes: list[int]
+    activation: str
+    dropout: float
+
+
+class NetworkConfigIn(BaseModel):
+    """神經網路的結構設定，只有 model_type 是神經網路類型時才會用到。"""
+
+    hidden_sizes: list[int] = Field(default_factory=lambda: [64, 32], min_length=1, max_length=8)
+    activation: Literal["relu", "tanh", "gelu"] = "relu"
+    dropout: float = Field(default=0.2, ge=0, le=0.9)
+    learning_rate: float = Field(default=0.001, gt=0, le=1)
+    epochs: int = Field(default=60, ge=1, le=1000)
+
+    @model_validator(mode="after")
+    def _check_sizes(self):
+        if any(size < 1 or size > 1024 for size in self.hidden_sizes):
+            raise ValueError("每層神經元數必須介於 1~1024")
+        return self
 
 
 class ScoreFormulaInfoOut(BaseModel):
@@ -207,12 +251,13 @@ class ModelTrainRequest(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
 
     model_family: str = Field(min_length=1, max_length=50)
-    model_type: Literal["xgboost", "lightgbm", "random_forest", "logistic_regression"]
+    model_type: Literal["xgboost", "lightgbm", "random_forest", "logistic_regression", "mlp"]
     feature_config: list[str] = Field(min_length=1)
     n_days: int = Field(gt=0, le=60)
     threshold_percent: float
     # 公式固定用橫斷面標準化，只有權重可調
     score_weights: dict | None = None
+    network_config: NetworkConfigIn | None = None
 
     min_hold_days: int | None = Field(default=None, ge=0, le=250)
     max_hold_days: int | None = Field(default=None, ge=1, le=250)
@@ -335,6 +380,7 @@ class ModelDetailOut(BaseModel):
 
     metrics: dict | None
     warnings: list[str]
+    network: NetworkInfoOut | None
 
     regression_points: list[ModelPredictionPointOut]
     calibration_buckets: list[CalibrationBucketOut]

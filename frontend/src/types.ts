@@ -154,7 +154,40 @@ export interface BackfillStatus {
   progress: BackfillProgress;
 }
 
-export type ModelType = "xgboost" | "lightgbm" | "random_forest" | "logistic_regression";
+export type ModelType = "xgboost" | "lightgbm" | "random_forest" | "logistic_regression" | "mlp";
+export type Activation = "relu" | "tanh" | "gelu";
+
+export interface NetworkLayer {
+  name: string;
+  type: string;
+  output_shape: string;
+  params: number;
+}
+
+export interface LossCurvePoint {
+  epoch: number;
+  train_loss: number;
+  validation_loss: number;
+}
+
+export interface NetworkInfo {
+  layers: NetworkLayer[];
+  total_params: number;
+  loss_curve: LossCurvePoint[];
+  device: string;
+  epochs: number;
+  hidden_sizes: number[];
+  activation: string;
+  dropout: number;
+}
+
+export interface NetworkConfigInput {
+  hidden_sizes: number[];
+  activation: Activation;
+  dropout: number;
+  learning_rate: number;
+  epochs: number;
+}
 export type ScoreFormula = "multiply" | "zscore_weighted";
 export type ModelStatus = "queued" | "training" | "completed" | "failed";
 
@@ -166,6 +199,7 @@ export interface FeatureOption {
 export interface ModelTypeOption {
   key: ModelType;
   label: string;
+  is_neural: boolean;
 }
 
 export interface ScoreFormulaInfo {
@@ -199,6 +233,7 @@ export interface ModelTrainRequest {
   n_days: number;
   threshold_percent: number;
   score_weights?: { return: number; probability: number } | null;
+  network_config?: NetworkConfigInput | null;
   min_hold_days?: number | null;
   max_hold_days?: number | null;
   stop_loss_percent?: number | null;
@@ -279,6 +314,7 @@ export interface ModelDetail {
   test_end: string;
   metrics: Record<string, any> | null;
   warnings: string[];
+  network: NetworkInfo | null;
   regression_points: ModelPredictionPoint[];
   calibration_buckets: CalibrationBucket[];
   backtest_trades: BacktestTradePoint[];

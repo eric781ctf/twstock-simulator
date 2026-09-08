@@ -22,13 +22,17 @@ from sklearn.metrics import accuracy_score, brier_score_loss, log_loss, mean_abs
 
 logger = logging.getLogger(__name__)
 
-MODEL_TYPES = ["xgboost", "lightgbm", "random_forest", "logistic_regression"]
+MODEL_TYPES = ["xgboost", "lightgbm", "random_forest", "logistic_regression", "mlp"]
+
+# 需要 GPU 且有「層」這個概念的模型類型；表單會對這些額外顯示網路結構設定
+NEURAL_MODEL_TYPES = ["mlp"]
 
 MODEL_TYPE_LABELS: dict[str, str] = {
     "xgboost": "XGBoost",
     "lightgbm": "LightGBM",
     "random_forest": "Random Forest",
     "logistic_regression": "Logistic / Linear Regression",
+    "mlp": "MLP 神經網路（GPU，共享 encoder 雙任務）",
 }
 
 
@@ -53,6 +57,11 @@ def build_models(model_type: str):
 
     if model_type == "logistic_regression":
         return LinearRegression(), LogisticRegression(max_iter=1000)
+
+    if model_type in NEURAL_MODEL_TYPES:
+        # 神經網路的輸入維度要看特徵數、還要拿驗證集算 loss 曲線，
+        # 不是 build 完再 fit 的兩段式流程，所以走 train_dual_task 裡的另一條路
+        raise ValueError(f"{model_type} 由 train_dual_task 直接建立，不經過 build_models")
 
     raise ValueError(f"不支援的模型類型：{model_type}")
 
@@ -163,23 +172,64 @@ def train_dual_task(
     x_validation: np.ndarray,
     y_validation_reg: np.ndarray,
     y_validation_clf: np.ndarray,
+    network_config: dict | None = None,
 ) -> tuple[object, object, dict]:
-    """訓練並用驗證集評估。回傳 (迴歸模型, 分類模型, metrics)。"""
-    regressor, classifier = build_models(model_type)
+    """訓練並用驗證集評估。回傳 (迴歸模型, 分類模型, metrics)。
 
-    regressor.fit(x_train, y_train_reg)
-    # 分類頭如果訓練集只有單一類別（門檻設太極端），sklearn 會直接拋錯，
-    # 這裡先擋下來給看得懂的訊息。
+    神經網路類型走另一條路：它是「一個共享 encoder + 兩個輸出頭」的單一模型，
+    回傳的兩個物件其實是同一個網路的兩種介面，不是兩個獨立訓練的模型。
+    """
     if len(np.unique(y_train_clf)) < 2:
         raise ValueError("訓練集裡沒有任何一筆達到門檻（或全部都達標），請調低/調高報酬率門檻")
-    classifier.fit(x_train, y_train_clf)
+
+    network_info: dict | None = None
+
+    if model_type in NEURAL_MODEL_TYPES:
+        from app.services.ml.torch_models import train_torch_dual_task
+
+        config = network_config or {}
+        torch_model = train_torch_dual_task(
+            x_train,
+            y_train_reg,
+            y_train_clf,
+            x_validation,
+            y_validation_reg,
+            y_validation_clf,
+            hidden_sizes=config.get("hidden_sizes") or [64, 32],
+            activation=config.get("activation") or "relu",
+            dropout=float(config.get("dropout", 0.2)),
+            learning_rate=float(config.get("learning_rate", 0.001)),
+            epochs=int(config.get("epochs", 60)),
+        )
+        regressor = torch_model.as_regressor()
+        classifier = torch_model.as_classifier()
+        network_info = {
+            "layers": torch_model.summary(),
+            "total_params": torch_model.total_params(),
+            "loss_curve": torch_model.loss_curve,
+            "device": torch_model.device_name,
+            "epochs": torch_model.epochs_run,
+            "hidden_sizes": torch_model.hidden_sizes,
+            "activation": torch_model.activation,
+            "dropout": torch_model.dropout,
+        }
+        importance = torch_model.input_weight_importance(feature_keys)
+        regression_importance = classification_importance = importance
+    else:
+        regressor, classifier = build_models(model_type)
+        regressor.fit(x_train, y_train_reg)
+        classifier.fit(x_train, y_train_clf)
+        regression_importance = _feature_importance(regressor, feature_keys)
+        classification_importance = _feature_importance(classifier, feature_keys)
 
     metrics = {
         "train": evaluate(regressor, classifier, x_train, y_train_reg, y_train_clf),
         "validation": evaluate(regressor, classifier, x_validation, y_validation_reg, y_validation_clf),
-        "regression_feature_importance": _feature_importance(regressor, feature_keys),
-        "classification_feature_importance": _feature_importance(classifier, feature_keys),
+        "regression_feature_importance": regression_importance,
+        "classification_feature_importance": classification_importance,
     }
+    if network_info is not None:
+        metrics["network"] = network_info
     logger.info(
         "train_dual_task(%s): 訓練 %d 列、驗證 %d 列，驗證 RankIC=%s AUC=%s",
         model_type,

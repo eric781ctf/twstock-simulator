@@ -27,6 +27,15 @@ services:
       - "8000:8000"
     volumes:
       - ./backend:/app
+    # 深度學習模型用 GPU 訓練；沒有 GPU 的環境把這段拿掉即可，
+    # 但訓練 MLP 類型時會直接失敗（刻意不靜默退回 CPU）
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
 
   frontend:
     build: ./frontend

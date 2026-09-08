@@ -279,6 +279,9 @@ class PredictionModel(Base):
     score_formula: Mapped[str] = mapped_column(String(20), nullable=False, default="zscore_weighted")
     score_weights: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
+    # 神經網路類型才會用到：層數與每層神經元數、啟用函數、dropout、epochs 等
+    network_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
     # 出場規則（四層，依序判斷，見 services/ml/exit_rules.py）
     min_hold_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     max_hold_days: Mapped[int | None] = mapped_column(Integer, nullable=True)

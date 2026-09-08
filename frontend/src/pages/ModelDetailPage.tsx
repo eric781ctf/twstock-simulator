@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { api } from "../api";
 import { CalibrationChart } from "../components/CalibrationChart";
 import { FeatureImportanceChart } from "../components/FeatureImportanceChart";
+import { NetworkSummary } from "../components/NetworkSummary";
 import { PredictionScatterChart } from "../components/PredictionScatterChart";
 import { ReturnScatterChart } from "../components/ReturnScatterChart";
 import { ScoreFormulaExplainer } from "../components/ScoreFormulaExplainer";
@@ -229,23 +230,50 @@ export default function ModelDetailPage() {
         <CalibrationChart buckets={detail.calibration_buckets} />
       </div>
 
+      {detail.network && (
+        <>
+          <h2 className="section-title">網路結構</h2>
+          <div className="panel">
+            <p className="order-hint">
+              這是一個共享 encoder 的雙任務網路：同一組隱藏層同時餵給「預期報酬」與「達標機率」兩個輸出頭，
+              兩邊的梯度會一起更新共享層。樹模型（XGBoost 等）沒有這個結構，是各自訓練兩個獨立模型。
+            </p>
+            <NetworkSummary info={detail.network} />
+          </div>
+        </>
+      )}
+
       <h2 className="section-title">模型倚重哪些特徵</h2>
-      <div className="stats-section">
+      {detail.network ? (
+        // 神經網路的兩個輸出頭吃的是同一組共享隱藏層，第一層權重只有一份，
+        // 拆成「迴歸頭 / 分類頭」兩張圖會畫出兩張一模一樣的圖，看起來像是
+        // 分別量出來的，其實不是——所以這裡只畫一張，並寫清楚它代表什麼。
         <div className="panel">
-          <h2>迴歸頭</h2>
+          <h2>共享 encoder 的第一層權重</h2>
           <p className="order-hint">
-            {isLinear ? "線性模型的係數，有正負號代表影響方向" : "樹模型的特徵重要性，數值越大代表越常被用來分裂"}
+            神經網路沒有內建的特徵重要性，這裡用第一層權重的絕對值平均當粗略指標，跟樹模型的分裂貢獻不是同一回事。
+            迴歸頭與分類頭共用同一組隱藏層，所以這份指標對兩個任務是同一份，無法拆開來看誰倚重誰。
           </p>
-          <FeatureImportanceChart items={detail.regression_feature_importance} signed={isLinear} />
+          <FeatureImportanceChart items={detail.regression_feature_importance} signed={false} />
         </div>
-        <div className="panel">
-          <h2>分類頭</h2>
-          <p className="order-hint">
-            {isLinear ? "邏輯迴歸的係數，正值代表推高達標機率" : "樹模型的特徵重要性"}
-          </p>
-          <FeatureImportanceChart items={detail.classification_feature_importance} signed={isLinear} />
+      ) : (
+        <div className="stats-section">
+          <div className="panel">
+            <h2>迴歸頭</h2>
+            <p className="order-hint">
+              {isLinear ? "線性模型的係數，有正負號代表影響方向" : "樹模型的特徵重要性，數值越大代表越常被用來分裂"}
+            </p>
+            <FeatureImportanceChart items={detail.regression_feature_importance} signed={isLinear} />
+          </div>
+          <div className="panel">
+            <h2>分類頭</h2>
+            <p className="order-hint">
+              {isLinear ? "邏輯迴歸的係數，正值代表推高達標機率" : "樹模型的特徵重要性"}
+            </p>
+            <FeatureImportanceChart items={detail.classification_feature_importance} signed={isLinear} />
+          </div>
         </div>
-      </div>
+      )}
 
       <h2 className="section-title">訓練參數</h2>
       <div className="panel">
