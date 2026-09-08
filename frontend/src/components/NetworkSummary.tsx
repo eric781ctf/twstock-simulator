@@ -19,10 +19,17 @@ export function NetworkSummary({ info }: { info: NetworkInfo }) {
           <span className="label">隱藏層</span>
           <span className="value">{info.hidden_sizes.join(" → ")}</span>
         </div>
-        <div className="stat">
-          <span className="label">啟用函數</span>
-          <span className="value">{info.activation}</span>
-        </div>
+        {info.sequence_length ? (
+          <div className="stat">
+            <span className="label">序列長度</span>
+            <span className="value">{info.sequence_length} 個交易日</span>
+          </div>
+        ) : (
+          <div className="stat">
+            <span className="label">啟用函數</span>
+            <span className="value">{info.activation}</span>
+          </div>
+        )}
         <div className="stat">
           <span className="label">Dropout</span>
           <span className="value">{info.dropout}</span>

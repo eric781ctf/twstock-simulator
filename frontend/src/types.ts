@@ -154,7 +154,14 @@ export interface BackfillStatus {
   progress: BackfillProgress;
 }
 
-export type ModelType = "xgboost" | "lightgbm" | "random_forest" | "logistic_regression" | "mlp";
+export type ModelType =
+  | "xgboost"
+  | "lightgbm"
+  | "random_forest"
+  | "logistic_regression"
+  | "mlp"
+  | "gru"
+  | "lstm";
 export type Activation = "relu" | "tanh" | "gelu";
 
 export interface NetworkLayer {
@@ -179,6 +186,9 @@ export interface NetworkInfo {
   hidden_sizes: number[];
   activation: string;
   dropout: number;
+  /** 只有 GRU/LSTM 有：一個樣本往回看幾個交易日 */
+  sequence_length: number | null;
+  kind: string | null;
 }
 
 export interface NetworkConfigInput {
@@ -187,6 +197,7 @@ export interface NetworkConfigInput {
   dropout: number;
   learning_rate: number;
   epochs: number;
+  sequence_length: number;
 }
 export type ScoreFormula = "multiply" | "zscore_weighted";
 export type ModelStatus = "queued" | "training" | "completed" | "failed";
@@ -200,6 +211,7 @@ export interface ModelTypeOption {
   key: ModelType;
   label: string;
   is_neural: boolean;
+  is_sequence: boolean;
 }
 
 export interface ScoreFormulaInfo {

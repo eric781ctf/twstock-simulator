@@ -25,6 +25,9 @@ DEFAULT_EPOCHS = 60
 DEFAULT_LEARNING_RATE = 0.001
 DEFAULT_DROPOUT = 0.2
 DEFAULT_BATCH_SIZE = 512
+# 推論時一次送進顯示卡幾筆。比訓練的 batch 大是因為推論不用存反向傳播要用的
+# 中間結果，但仍然要有上限——評估時整個訓練集會一次傳進來。
+PREDICT_BATCH = 4096
 
 ACTIVATIONS = ["relu", "tanh", "gelu"]
 
@@ -81,42 +84,111 @@ class DualTaskMLP(nn.Module):
         return self.regression_head(shared).squeeze(-1), self.classification_head(shared).squeeze(-1)
 
 
-def build_network(n_features: int, hidden_sizes: list[int], activation: str, dropout: float):
+class DualTaskRNN(nn.Module):
+    """GRU / LSTM 版本的雙任務網路。
+
+    跟 MLP 的差別只在 encoder：MLP 吃「某一天的特徵」，這裡吃「這一天之前連續
+    T 天的特徵」，讓網路自己去抓時間上的變化，而不是靠我們手動算好的
+    5日/20日乖離率之類的彙總特徵。
+
+        (batch, T, 特徵數) ─→ RNN 層 ─→ 取最後一個時間步 ─┬─→ 迴歸頭
+                                                          └─→ 分類頭
+
+    PyTorch 的 nn.GRU/nn.LSTM 用 num_layers 疊多層時，每層的 hidden size 必須
+    一樣。這裡改成自己疊一串各自獨立的單層 RNN，admin 才能像設定 MLP 那樣
+    指定「64 → 32」這種逐層縮小的結構，結構表上也才看得到每層真正的 shape。
+    """
+
+    def __init__(self, n_features: int, hidden_sizes: list[int], cell: str, dropout: float):
+        super().__init__()
+        self.cell = cell
+        rnn_cls = nn.LSTM if cell == "lstm" else nn.GRU
+        self.rnn_layers = nn.ModuleList()
+        self.dropouts = nn.ModuleList()
+        prev = n_features
+        for size in hidden_sizes:
+            self.rnn_layers.append(rnn_cls(prev, size, batch_first=True))
+            # dropout=0 時放 Identity，層數才會跟 dropouts 對齊，forward 不用分支
+            self.dropouts.append(nn.Dropout(dropout) if dropout > 0 else nn.Identity())
+            prev = size
+        self.regression_head = nn.Linear(prev, 1)
+        self.classification_head = nn.Linear(prev, 1)
+
+    def forward(self, x):
+        out = x
+        for rnn, drop in zip(self.rnn_layers, self.dropouts):
+            out, _ = rnn(out)
+            out = drop(out)
+        # 只取最後一個時間步：那是「看完整段歷史之後」的狀態，也是要拿來預測的那一天
+        shared = out[:, -1, :]
+        return self.regression_head(shared).squeeze(-1), self.classification_head(shared).squeeze(-1)
+
+
+def build_network(
+    n_features: int,
+    hidden_sizes: list[int],
+    activation: str,
+    dropout: float,
+    model_kind: str = "mlp",
+):
+    if model_kind in ("gru", "lstm"):
+        return DualTaskRNN(n_features, hidden_sizes, model_kind, dropout)
     return DualTaskMLP(n_features, hidden_sizes, activation, dropout)
 
 
-def summarize_network(model, n_features: int) -> list[dict]:
+def _layer_row(module, name: str, output_shape: str) -> dict:
+    return {
+        "name": name,
+        "type": type(module).__name__,
+        "output_shape": output_shape,
+        "params": int(sum(p.numel() for p in module.parameters())),
+    }
+
+
+def summarize_network(model, n_features: int, sequence_length: int | None = None) -> list[dict]:
     """產生類似 Keras model.summary() 的逐層資訊：每層的輸出形狀與參數量。
 
     batch 維度寫成 None，跟 Keras 的慣例一致——那一維取決於餵進去多少筆，
-    不是網路結構的一部分。
+    不是網路結構的一部分。序列模型的輸入多一個時間維度，寫成 (None, T, 特徵數)。
     """
-    rows: list[dict] = []
+    if isinstance(model, DualTaskRNN):
+        return _summarize_rnn(model, n_features, sequence_length or 0)
+    return _summarize_mlp(model, n_features)
+
+
+def _summarize_mlp(model, n_features: int) -> list[dict]:
+    rows: list[dict] = [{"name": "input", "type": "Input", "output_shape": f"(None, {n_features})", "params": 0}]
     current = n_features
     counters: dict[str, int] = {}
 
-    def add(module, label_prefix: str, out_features: int):
-        kind = type(module).__name__
-        counters[kind] = counters.get(kind, 0) + 1
-        params = sum(p.numel() for p in module.parameters())
-        rows.append(
-            {
-                "name": f"{label_prefix}{kind.lower()}_{counters[kind]}",
-                "type": kind,
-                "output_shape": f"(None, {out_features})",
-                "params": int(params),
-            }
-        )
-
-    rows.append({"name": "input", "type": "Input", "output_shape": f"(None, {n_features})", "params": 0})
-
     for module in model.encoder:
+        kind = type(module).__name__
         if isinstance(module, nn.Linear):
             current = module.out_features
-        add(module, "", current)
+        counters[kind] = counters.get(kind, 0) + 1
+        rows.append(_layer_row(module, f"{kind.lower()}_{counters[kind]}", f"(None, {current})"))
 
-    add(model.regression_head, "head_", model.regression_head.out_features)
-    add(model.classification_head, "head_", model.classification_head.out_features)
+    rows.append(_layer_row(model.regression_head, "head_linear_1", "(None, 1)"))
+    rows.append(_layer_row(model.classification_head, "head_linear_2", "(None, 1)"))
+    return rows
+
+
+def _summarize_rnn(model, n_features: int, sequence_length: int) -> list[dict]:
+    rows: list[dict] = [
+        {"name": "input", "type": "Input", "output_shape": f"(None, {sequence_length}, {n_features})", "params": 0}
+    ]
+    current = n_features
+    for i, (rnn, drop) in enumerate(zip(model.rnn_layers, model.dropouts), start=1):
+        current = rnn.hidden_size
+        kind = type(rnn).__name__.lower()
+        rows.append(_layer_row(rnn, f"{kind}_{i}", f"(None, {sequence_length}, {current})"))
+        if not isinstance(drop, nn.Identity):
+            rows.append(_layer_row(drop, f"dropout_{i}", f"(None, {sequence_length}, {current})"))
+
+    # 這一步沒有參數，但少了它讀的人會看不懂 shape 為什麼突然掉一個維度
+    rows.append({"name": "last_timestep", "type": "Slice", "output_shape": f"(None, {current})", "params": 0})
+    rows.append(_layer_row(model.regression_head, "head_linear_1", "(None, 1)"))
+    rows.append(_layer_row(model.classification_head, "head_linear_2", "(None, 1)"))
     return rows
 
 
@@ -149,12 +221,23 @@ class TorchDualTaskModel:
     device id，換一台機器或多卡環境載入就會出事。
     """
 
-    def __init__(self, network, n_features: int, hidden_sizes: list[int], activation: str, dropout: float):
+    def __init__(
+        self,
+        network,
+        n_features: int,
+        hidden_sizes: list[int],
+        activation: str,
+        dropout: float,
+        model_kind: str = "mlp",
+        sequence_length: int | None = None,
+    ):
         self.network = network
         self.n_features = n_features
         self.hidden_sizes = hidden_sizes
         self.activation = activation
         self.dropout = dropout
+        self.model_kind = model_kind
+        self.sequence_length = sequence_length
         self.loss_curve: list[dict] = []
         self.device_name: str = ""
         self.epochs_run: int = 0
@@ -166,16 +249,31 @@ class TorchDualTaskModel:
         return _ClassifierView(self)
 
     def predict_both(self, x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """分批做前向傳播，回傳 (預測報酬率, 達標機率)。
+
+        一定要分批：評估時會一口氣傳進整個訓練集（三十幾萬筆），而 RNN 每一筆
+        還要展開成 T 個時間步、每步都留著中間狀態，整批直接進顯示卡會要到
+        幾十 GB。分批不影響結果，只影響一次佔用多少顯示記憶體。
+        """
         device = next(self.network.parameters()).device
         self.network.eval()
+        x = np.asarray(x, dtype=np.float32)
+
+        regressions: list[np.ndarray] = []
+        probabilities: list[np.ndarray] = []
         with torch.no_grad():
-            tensor = torch.as_tensor(np.asarray(x, dtype=np.float32), device=device)
-            regression, logits = self.network(tensor)
-            probability = torch.sigmoid(logits)
-        return regression.cpu().numpy(), probability.cpu().numpy()
+            for start in range(0, len(x), PREDICT_BATCH):
+                tensor = torch.as_tensor(x[start : start + PREDICT_BATCH], device=device)
+                regression, logits = self.network(tensor)
+                regressions.append(regression.cpu().numpy())
+                probabilities.append(torch.sigmoid(logits).cpu().numpy())
+
+        if not regressions:
+            return np.array([]), np.array([])
+        return np.concatenate(regressions), np.concatenate(probabilities)
 
     def summary(self) -> list[dict]:
-        return summarize_network(self.network, self.n_features)
+        return summarize_network(self.network, self.n_features, self.sequence_length)
 
     def total_params(self) -> int:
         return int(sum(p.numel() for p in self.network.parameters()))
@@ -184,13 +282,27 @@ class TorchDualTaskModel:
         """神經網路沒有樹模型那種內建的特徵重要性。這裡用第一層權重的絕對值
         平均當作粗略指標——只能看出「這個特徵在第一層被用得多重」，跟樹模型的
         分裂貢獻不是同一回事，詳情頁會標註清楚。"""
-        first_linear = next((m for m in self.network.encoder if isinstance(m, nn.Linear)), None)
-        if first_linear is None:
-            return []
-        weights = first_linear.weight.detach().abs().mean(dim=0).cpu().numpy()
-        if len(weights) != len(feature_keys):
+        weights = self._first_layer_input_weights()
+        if weights is None or len(weights) != len(feature_keys):
             return []
         return [{"feature": key, "importance": float(w)} for key, w in zip(feature_keys, weights)]
+
+    def _first_layer_input_weights(self) -> np.ndarray | None:
+        """取第一層「吃輸入特徵」的那組權重，對輸出維度取絕對值平均。
+
+        RNN 的 weight_ih_l0 把 3 個閘（LSTM 是 4 個）的權重直接疊在同一個矩陣的
+        列方向，形狀是 (閘數 × hidden, 特徵數)。我們只在乎「每個輸入特徵被用得
+        多重」，所以直接對整個列方向取平均就好，不用先拆開閘。
+        """
+        if isinstance(self.network, DualTaskRNN):
+            if not self.network.rnn_layers:
+                return None
+            return self.network.rnn_layers[0].weight_ih_l0.detach().abs().mean(dim=0).cpu().numpy()
+
+        first_linear = next((m for m in self.network.encoder if isinstance(m, nn.Linear)), None)
+        if first_linear is None:
+            return None
+        return first_linear.weight.detach().abs().mean(dim=0).cpu().numpy()
 
     def to_cpu(self) -> None:
         self.network.to("cpu")
@@ -209,12 +321,15 @@ def train_torch_dual_task(
     learning_rate: float,
     epochs: int,
     batch_size: int = DEFAULT_BATCH_SIZE,
+    model_kind: str = "mlp",
 ) -> TorchDualTaskModel:
+    """x_train 是 (N, 特徵數)（MLP）或 (N, T, 特徵數)（GRU/LSTM）。"""
     from torch.utils.data import DataLoader, TensorDataset
 
     device = resolve_device()
-    n_features = x_train.shape[1]
-    network = build_network(n_features, hidden_sizes, activation, dropout).to(device)
+    n_features = x_train.shape[-1]
+    sequence_length = int(x_train.shape[1]) if x_train.ndim == 3 else None
+    network = build_network(n_features, hidden_sizes, activation, dropout, model_kind).to(device)
 
     dataset = TensorDataset(
         torch.as_tensor(x_train, dtype=torch.float32),
@@ -223,16 +338,39 @@ def train_torch_dual_task(
     )
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
-    x_val_t = torch.as_tensor(x_validation, dtype=torch.float32, device=device)
-    y_val_reg_t = torch.as_tensor(y_validation_reg, dtype=torch.float32, device=device)
-    y_val_clf_t = torch.as_tensor(y_validation_clf, dtype=torch.float32, device=device)
+    # 驗證集留在 CPU、分批送上去算。序列資料每筆多了一個時間維度，整批直接塞
+    # 進顯示卡在 T 拉長時會爆掉，而這裡只是算 loss，分批完全不影響結果。
+    x_val_t = torch.as_tensor(x_validation, dtype=torch.float32)
+    y_val_reg_t = torch.as_tensor(y_validation_reg, dtype=torch.float32)
+    y_val_clf_t = torch.as_tensor(y_validation_clf, dtype=torch.float32)
 
     optimizer = torch.optim.Adam(network.parameters(), lr=learning_rate)
     regression_loss = nn.MSELoss()
     classification_loss = nn.BCEWithLogitsLoss()
 
-    model = TorchDualTaskModel(network, n_features, hidden_sizes, activation, dropout)
+    model = TorchDualTaskModel(
+        network, n_features, hidden_sizes, activation, dropout, model_kind, sequence_length
+    )
     model.device_name = describe_device()
+
+    def validation_loss() -> float:
+        """整個驗證集的平均 loss，用樣本數加權（最後一批通常比較小）。"""
+        network.eval()
+        total = 0.0
+        seen = 0
+        with torch.no_grad():
+            for start in range(0, len(x_val_t), batch_size):
+                xb = x_val_t[start : start + batch_size].to(device)
+                yb_reg = y_val_reg_t[start : start + batch_size].to(device)
+                yb_clf = y_val_clf_t[start : start + batch_size].to(device)
+                pred_reg, pred_logit = network(xb)
+                batch_loss = (
+                    regression_loss(pred_reg, yb_reg).item()
+                    + classification_loss(pred_logit, yb_clf).item()
+                )
+                total += batch_loss * len(xb)
+                seen += len(xb)
+        return total / max(seen, 1)
 
     for epoch in range(1, epochs + 1):
         network.train()
@@ -253,21 +391,18 @@ def train_torch_dual_task(
             epoch_total += float(loss.item())
             batches += 1
 
-        network.eval()
-        with torch.no_grad():
-            val_reg, val_logit = network(x_val_t)
-            val_loss = float(
-                regression_loss(val_reg, y_val_reg_t).item()
-                + classification_loss(val_logit, y_val_clf_t).item()
-            )
-
         model.loss_curve.append(
-            {"epoch": epoch, "train_loss": epoch_total / max(batches, 1), "validation_loss": val_loss}
+            {
+                "epoch": epoch,
+                "train_loss": epoch_total / max(batches, 1),
+                "validation_loss": validation_loss(),
+            }
         )
 
     model.epochs_run = epochs
     logger.info(
-        "train_torch_dual_task: %s，%d 層、%d 個參數、%d epochs，最終驗證 loss %.4f",
+        "train_torch_dual_task(%s): %s，%d 層、%d 個參數、%d epochs，最終驗證 loss %.4f",
+        model_kind,
         model.device_name,
         len(hidden_sizes),
         model.total_params(),

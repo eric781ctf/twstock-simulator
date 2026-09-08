@@ -173,6 +173,8 @@ class ModelTypeOptionOut(BaseModel):
     label: str
     # 有「層」這個概念、需要 GPU 的類型；前端據此決定要不要顯示網路結構設定
     is_neural: bool
+    # 吃「連續 T 天的視窗」的類型（GRU/LSTM）；前端據此多顯示序列長度欄位
+    is_sequence: bool = False
 
 
 class NetworkLayerOut(BaseModel):
@@ -199,6 +201,9 @@ class NetworkInfoOut(BaseModel):
     hidden_sizes: list[int]
     activation: str
     dropout: float
+    # 只有 GRU/LSTM 有：一個樣本往回看幾個交易日
+    sequence_length: int | None = None
+    kind: str | None = None
 
 
 class NetworkConfigIn(BaseModel):
@@ -209,6 +214,8 @@ class NetworkConfigIn(BaseModel):
     dropout: float = Field(default=0.2, ge=0, le=0.9)
     learning_rate: float = Field(default=0.001, gt=0, le=1)
     epochs: int = Field(default=60, ge=1, le=1000)
+    # GRU/LSTM 專用；MLP 會忽略這個值
+    sequence_length: int = Field(default=20, ge=5, le=120)
 
     @model_validator(mode="after")
     def _check_sizes(self):
@@ -251,7 +258,7 @@ class ModelTrainRequest(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
 
     model_family: str = Field(min_length=1, max_length=50)
-    model_type: Literal["xgboost", "lightgbm", "random_forest", "logistic_regression", "mlp"]
+    model_type: Literal["xgboost", "lightgbm", "random_forest", "logistic_regression", "mlp", "gru", "lstm"]
     feature_config: list[str] = Field(min_length=1)
     n_days: int = Field(gt=0, le=60)
     threshold_percent: float

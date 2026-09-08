@@ -55,6 +55,7 @@ export default function AdminModelsPage() {
   const [dropout, setDropout] = useState("0.2");
   const [learningRate, setLearningRate] = useState("0.001");
   const [epochs, setEpochs] = useState("60");
+  const [sequenceLength, setSequenceLength] = useState("20");
   const [dates, setDates] = useState({
     train_start: "",
     train_end: "",
@@ -140,6 +141,7 @@ export default function AdminModelsPage() {
             dropout: Number(dropout),
             learning_rate: Number(learningRate),
             epochs: Number(epochs),
+            sequence_length: Number(sequenceLength),
           }
         : null,
       min_hold_days: optionalNumber(minHold),
@@ -175,8 +177,10 @@ export default function AdminModelsPage() {
     }
   }
 
-  // 哪些類型算神經網路由後端決定，前端不自己維護一份清單
-  const isNeural = defaults?.model_types.find((t) => t.key === modelType)?.is_neural ?? false;
+  // 哪些類型算神經網路／序列模型由後端決定，前端不自己維護一份清單
+  const selectedType = defaults?.model_types.find((t) => t.key === modelType);
+  const isNeural = selectedType?.is_neural ?? false;
+  const isSequence = selectedType?.is_sequence ?? false;
   const parsedHiddenSizes = hiddenSizes
     .split(/[,\s]+/)
     .map((v) => Number(v.trim()))
@@ -248,6 +252,13 @@ export default function AdminModelsPage() {
                 這裡設定的是共享 encoder 的結構——兩個輸出頭（預期報酬、達標機率）會接在最後一層之後，
                 共用同一組隱藏層一起訓練。訓練一律使用 GPU，沒有可用的 GPU 會直接失敗。
               </p>
+              {isSequence && (
+                <p className="order-hint">
+                  這是循環神經網路：一個樣本不是「某一天的特徵」，而是「這一天之前連續 N 天的特徵」，
+                  由網路自己去看這段期間怎麼變化。相對地，前面歷史不足 N 天的股票（剛上市、或本地日K
+                  還沒回補到那麼早）當天就不會被列入選股候選。
+                </p>
+              )}
               <div className="strategy-form-grid">
                 <label>
                   每層神經元數（用逗號分隔）
@@ -257,14 +268,27 @@ export default function AdminModelsPage() {
                     onChange={(e) => setHiddenSizes(e.target.value)}
                   />
                 </label>
-                <label>
-                  啟用函數
-                  <select value={activation} onChange={(e) => setActivation(e.target.value as Activation)}>
-                    <option value="relu">ReLU</option>
-                    <option value="tanh">Tanh</option>
-                    <option value="gelu">GELU</option>
-                  </select>
-                </label>
+                {isSequence ? (
+                  <label>
+                    序列長度（往回看幾個交易日）
+                    <input
+                      type="number"
+                      min={5}
+                      max={120}
+                      value={sequenceLength}
+                      onChange={(e) => setSequenceLength(e.target.value)}
+                    />
+                  </label>
+                ) : (
+                  <label>
+                    啟用函數
+                    <select value={activation} onChange={(e) => setActivation(e.target.value as Activation)}>
+                      <option value="relu">ReLU</option>
+                      <option value="tanh">Tanh</option>
+                      <option value="gelu">GELU</option>
+                    </select>
+                  </label>
+                )}
                 <label>
                   Dropout
                   <input type="number" step="0.05" min={0} max={0.9} value={dropout} onChange={(e) => setDropout(e.target.value)} />
@@ -280,7 +304,10 @@ export default function AdminModelsPage() {
               </div>
               {parsedHiddenSizes.length > 0 && (
                 <p className="order-hint network-preview">
-                  結構預覽：{features.length} 個特徵 → {parsedHiddenSizes.join(" → ")} → 兩個輸出頭（迴歸 1、分類 1）
+                  結構預覽：
+                  {isSequence
+                    ? `${sequenceLength} 天 × ${features.length} 個特徵 → ${parsedHiddenSizes.join(" → ")} → 取最後一個時間步 → 兩個輸出頭（迴歸 1、分類 1）`
+                    : `${features.length} 個特徵 → ${parsedHiddenSizes.join(" → ")} → 兩個輸出頭（迴歸 1、分類 1）`}
                 </p>
               )}
             </>

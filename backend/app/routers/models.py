@@ -29,6 +29,7 @@ from app.services.ml.train import (
     MODEL_TYPE_LABELS,
     MODEL_TYPES,
     NEURAL_MODEL_TYPES,
+    SEQUENCE_MODEL_TYPES,
     SCORE_FORMULA_INFO,
     SCORE_FORMULA_KEY,
 )
@@ -49,7 +50,12 @@ def get_train_defaults(db: Session = Depends(get_db), _: User = Depends(require_
         default_features=DEFAULT_FEATURES,
         features=[FeatureOptionOut(key=key, label=FEATURE_LABELS[key]) for key in FEATURE_KEYS],
         model_types=[
-            ModelTypeOptionOut(key=key, label=MODEL_TYPE_LABELS[key], is_neural=key in NEURAL_MODEL_TYPES)
+            ModelTypeOptionOut(
+                key=key,
+                label=MODEL_TYPE_LABELS[key],
+                is_neural=key in NEURAL_MODEL_TYPES,
+                is_sequence=key in SEQUENCE_MODEL_TYPES,
+            )
             for key in MODEL_TYPES
         ],
         score_formula=ScoreFormulaInfoOut(**SCORE_FORMULA_INFO),

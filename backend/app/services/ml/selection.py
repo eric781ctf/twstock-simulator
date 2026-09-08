@@ -48,13 +48,38 @@ class EntryAction:
 @dataclass
 class ModelBundle:
     """訓練完成後推論需要的一整組東西：兩個模型 + 訓練集算出來的標準化參數 +
-    特徵順序。特徵順序一定要跟訓練當下一致，不然欄位會對錯。"""
+    特徵順序。特徵順序一定要跟訓練當下一致，不然欄位會對錯。
+
+    sequence_length 只有 GRU/LSTM 會設；有值就代表這個模型吃的是「連續 T 天的
+    視窗」，餵進去的特徵列必須先經過 sequences.index_feature_rows 掛上歷史參照。
+    """
 
     regressor: object
     classifier: object
     feature_keys: list[str]
     scaler_mean: np.ndarray
     scaler_std: np.ndarray
+    sequence_length: int | None = None
+
+
+# 一次推論的最大筆數。回測時 save_predictions 會一口氣丟進近十萬列，序列模型
+# 每列還要展開成 T×F，不分批的話光是組輸入就會吃掉好幾百 MB。
+PREDICT_BATCH = 8192
+
+
+def _build_input(bundle: ModelBundle, rows: list[dict]) -> np.ndarray:
+    """組出模型要的輸入：表格式模型是 (N, F)，序列模型是 (N, T, F)。"""
+    if bundle.sequence_length:
+        from app.services.ml.sequences import stack_sequences
+
+        x = stack_sequences(rows, bundle.sequence_length)
+    else:
+        x = np.zeros((len(rows), len(bundle.feature_keys)), dtype=np.float64)
+        for i, row in enumerate(rows):
+            for j, key in enumerate(bundle.feature_keys):
+                value = row.get(key)
+                x[i, j] = float(value) if value is not None and np.isfinite(float(value)) else np.nan
+    return apply_scaler(x, bundle.scaler_mean, bundle.scaler_std)
 
 
 def predict_rows(bundle: ModelBundle, rows: list[dict]) -> tuple[np.ndarray, np.ndarray]:
@@ -62,19 +87,19 @@ def predict_rows(bundle: ModelBundle, rows: list[dict]) -> tuple[np.ndarray, np.
     if not rows:
         return np.array([]), np.array([])
 
-    x = np.zeros((len(rows), len(bundle.feature_keys)), dtype=np.float64)
-    for i, row in enumerate(rows):
-        for j, key in enumerate(bundle.feature_keys):
-            value = row.get(key)
-            x[i, j] = float(value) if value is not None and np.isfinite(float(value)) else np.nan
-    x = apply_scaler(x, bundle.scaler_mean, bundle.scaler_std)
+    returns_chunks: list[np.ndarray] = []
+    probability_chunks: list[np.ndarray] = []
 
-    predicted_returns = np.asarray(bundle.regressor.predict(x), dtype=float)
-    if hasattr(bundle.classifier, "predict_proba"):
-        probabilities = np.asarray(bundle.classifier.predict_proba(x)[:, 1], dtype=float)
-    else:
-        probabilities = np.asarray(bundle.classifier.predict(x), dtype=float)
-    return predicted_returns, probabilities
+    for start in range(0, len(rows), PREDICT_BATCH):
+        chunk = rows[start : start + PREDICT_BATCH]
+        x = _build_input(bundle, chunk)
+        returns_chunks.append(np.asarray(bundle.regressor.predict(x), dtype=float))
+        if hasattr(bundle.classifier, "predict_proba"):
+            probability_chunks.append(np.asarray(bundle.classifier.predict_proba(x)[:, 1], dtype=float))
+        else:
+            probability_chunks.append(np.asarray(bundle.classifier.predict(x), dtype=float))
+
+    return np.concatenate(returns_chunks), np.concatenate(probability_chunks)
 
 
 def run_daily_cycle(
@@ -118,6 +143,12 @@ def run_daily_cycle(
         return exits, []
 
     candidates = [row for row in rows_today if row["stock_code"] not in still_held]
+    if bundle.sequence_length:
+        # 序列模型對「前面歷史不足 T 天」的股票根本算不出分數（剛上市、或本地
+        # 日K還沒回補到那麼早）。這些直接不列入候選，不用補零硬湊一段假歷史。
+        from app.services.ml.sequences import filter_rows_with_history
+
+        candidates = filter_rows_with_history(candidates, bundle.sequence_length)
     if not candidates:
         return exits, []
 

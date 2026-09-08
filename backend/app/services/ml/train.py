@@ -1,10 +1,15 @@
 """雙任務模型訓練：同一組特徵，訓練一個迴歸頭（預測未來 N 天報酬率）跟一個
 分類頭（預測是否超過門檻）。
 
-v1 用的是傳統表格式 ML，所以「共用 encoder」在這裡的實際意義是：**兩個模型吃
-同一份特徵矩陣、同一組標準化參數**，而不是像神經網路那樣共享權重。樹模型沒有
-可以共享的隱藏層，硬要模擬只會把架構弄複雜卻沒有好處。真正的 shared encoder
-要等之後改用 GRU/Transformer 才有意義。
+「共用 encoder」在這裡有兩種截然不同的意思，看模型類型而定：
+
+- **樹模型 / 線性模型**：兩個模型吃同一份特徵矩陣、同一組標準化參數，但權重
+  各自獨立。樹沒有可以共享的隱藏層，硬要模擬只會把架構弄複雜卻沒有好處。
+- **神經網路（MLP / GRU / LSTM）**：真正共享同一組隱藏層，兩個任務的梯度會
+  一起更新它。回傳的「兩個模型」其實是同一個網路的兩種介面。
+
+其中 GRU/LSTM 又跟其他類型差一層：它吃的是「連續 T 天的視窗」而不是「某一天
+的一列」，資料組裝在 sequences.py。
 
 評估指標刻意不只看 RMSE/Accuracy：
 - 迴歸看 Rank IC（預測值與實際報酬的等級相關），因為選股實際上只在乎「排序對
@@ -22,10 +27,13 @@ from sklearn.metrics import accuracy_score, brier_score_loss, log_loss, mean_abs
 
 logger = logging.getLogger(__name__)
 
-MODEL_TYPES = ["xgboost", "lightgbm", "random_forest", "logistic_regression", "mlp"]
+MODEL_TYPES = ["xgboost", "lightgbm", "random_forest", "logistic_regression", "mlp", "gru", "lstm"]
 
 # 需要 GPU 且有「層」這個概念的模型類型；表單會對這些額外顯示網路結構設定
-NEURAL_MODEL_TYPES = ["mlp"]
+NEURAL_MODEL_TYPES = ["mlp", "gru", "lstm"]
+
+# 吃「連續 T 天的視窗」而不是「某一天的一列」的模型；表單會多一個序列長度欄位
+SEQUENCE_MODEL_TYPES = ["gru", "lstm"]
 
 MODEL_TYPE_LABELS: dict[str, str] = {
     "xgboost": "XGBoost",
@@ -33,6 +41,8 @@ MODEL_TYPE_LABELS: dict[str, str] = {
     "random_forest": "Random Forest",
     "logistic_regression": "Logistic / Linear Regression",
     "mlp": "MLP 神經網路（GPU，共享 encoder 雙任務）",
+    "gru": "GRU 循環神經網路（GPU，吃連續 N 天的序列）",
+    "lstm": "LSTM 循環神經網路（GPU，吃連續 N 天的序列）",
 }
 
 
@@ -133,7 +143,12 @@ def evaluate(
 MIN_HEALTHY_TRAIN_SAMPLES = 2000
 
 
-def build_data_warnings(train_metrics: dict, validation_metrics: dict, test_metrics: dict) -> list[str]:
+def build_data_warnings(
+    train_metrics: dict,
+    validation_metrics: dict,
+    test_metrics: dict,
+    network_info: dict | None = None,
+) -> list[str]:
     """訓練資料本身有問題時，要讓看的人知道「這個模型的數字不能當真」，
     而不是讓他對著一個過擬合的漂亮訓練分數做決策。
 
@@ -160,7 +175,47 @@ def build_data_warnings(train_metrics: dict, validation_metrics: dict, test_metr
                 f"訓練 AUC（{train_metrics['auc']:.2f}）遠高於驗證 AUC"
                 f"（{validation_metrics['auc']:.2f}），是典型的過擬合徵兆。"
             )
+
+    # Rank IC 是這個系統實際拿來排名選股的東西，訓練/驗證差距比 AUC 更早、
+    # 也更直接反映「這個模型只是把訓練資料背起來了」
+    train_ic = train_metrics.get("rank_ic")
+    validation_ic = validation_metrics.get("rank_ic")
+    if train_ic is not None and validation_ic is not None:
+        if train_ic - validation_ic > 0.15:
+            warnings.append(
+                f"訓練 Rank IC（{train_ic:.3f}）遠高於驗證 Rank IC（{validation_ic:.3f}）。"
+                "模型在沒看過的資料上幾乎沒有排序能力，照它選股跟隨機選相去不遠。"
+            )
+
+    warnings.extend(_loss_curve_warnings(network_info))
     return warnings
+
+
+def _loss_curve_warnings(network_info: dict | None) -> list[str]:
+    """從 loss 曲線看有沒有訓練過頭。
+
+    這是神經網路才有的訊號，而且比單看 AUC/Rank IC 差距更明確：驗證 loss 觸底
+    之後回頭往上，就代表從那個 epoch 之後網路是在背訓練資料，不是在學規律。
+    """
+    if not network_info:
+        return []
+    curve = network_info.get("loss_curve") or []
+    if len(curve) < 5:
+        return []
+
+    validation_losses = [point["validation_loss"] for point in curve]
+    best_index = int(np.argmin(validation_losses))
+    best = validation_losses[best_index]
+    final = validation_losses[-1]
+    if best <= 0 or final <= best * 1.05:
+        return []
+
+    best_epoch = curve[best_index]["epoch"]
+    return [
+        f"驗證 loss 在第 {best_epoch} 個 epoch 觸底（{best:.2f}），"
+        f"之後一路回升到 {final:.2f}，代表後面那些 epoch 都在過擬合。"
+        f"建議把訓練輪數降到 {best_epoch} 附近，或提高 dropout。"
+    ]
 
 
 def train_dual_task(
@@ -200,6 +255,7 @@ def train_dual_task(
             dropout=float(config.get("dropout", 0.2)),
             learning_rate=float(config.get("learning_rate", 0.001)),
             epochs=int(config.get("epochs", 60)),
+            model_kind=model_type,
         )
         regressor = torch_model.as_regressor()
         classifier = torch_model.as_classifier()
@@ -212,6 +268,8 @@ def train_dual_task(
             "hidden_sizes": torch_model.hidden_sizes,
             "activation": torch_model.activation,
             "dropout": torch_model.dropout,
+            "sequence_length": torch_model.sequence_length,
+            "kind": torch_model.model_kind,
         }
         importance = torch_model.input_weight_importance(feature_keys)
         regression_importance = classification_importance = importance

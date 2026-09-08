@@ -238,6 +238,14 @@ export default function ModelDetailPage() {
               這是一個共享 encoder 的雙任務網路：同一組隱藏層同時餵給「預期報酬」與「達標機率」兩個輸出頭，
               兩邊的梯度會一起更新共享層。樹模型（XGBoost 等）沒有這個結構，是各自訓練兩個獨立模型。
             </p>
+            {detail.network.sequence_length && (
+              <p className="order-hint">
+                這個模型是循環神經網路（{detail.network.kind?.toUpperCase()}）：一個樣本是
+                「這一天之前連續 {detail.network.sequence_length} 個交易日」的特徵，網路依序讀完這段歷史，
+                取最後一個時間步的狀態去預測。所以下表的 shape 比一般網路多一個時間維度
+                （None、時間步、特徵數）。
+              </p>
+            )}
             <NetworkSummary info={detail.network} />
           </div>
         </>

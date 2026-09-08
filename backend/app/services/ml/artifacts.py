@@ -55,6 +55,7 @@ def save_bundle(
     feature_keys: list[str],
     scaler_mean: np.ndarray,
     scaler_std: np.ndarray,
+    sequence_length: int | None = None,
 ) -> str:
     target = artifact_dir(model_id)
     target.mkdir(parents=True, exist_ok=True)
@@ -66,6 +67,7 @@ def save_bundle(
             "feature_keys": feature_keys,
             "scaler_mean": scaler_mean,
             "scaler_std": scaler_std,
+            "sequence_length": sequence_length,
         },
         target / "bundle.joblib",
     )
@@ -82,4 +84,6 @@ def load_bundle(model_artifact_path: str) -> ModelBundle:
         feature_keys=payload["feature_keys"],
         scaler_mean=payload["scaler_mean"],
         scaler_std=payload["scaler_std"],
+        # 這個 PR 之前存的模型檔沒有這個 key，取不到就是非序列模型
+        sequence_length=payload.get("sequence_length"),
     )

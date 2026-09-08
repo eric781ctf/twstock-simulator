@@ -13,15 +13,30 @@ from datetime import date, timedelta
 
 from sqlalchemy.orm import Session
 
-from app.models import DailyBar, ModelHolding, ModelScoringRun, PredictionModel
+from app.models import DailyBar, Market, ModelHolding, ModelScoringRun, PredictionModel, Stock
 from app.services.ml import artifacts
 from app.services.ml.exit_rules import net_return_percent
 from app.services.ml.features import WARMUP_BARS, build_feature_rows
 from app.services.ml.selection import OpenPosition, run_daily_cycle
+from app.services.ml.sequences import DEFAULT_SEQUENCE_LENGTH, index_feature_rows
+from app.services.ml.train import SEQUENCE_MODEL_TYPES
 
 logger = logging.getLogger(__name__)
 
 WARMUP_CALENDAR_DAYS = WARMUP_BARS * 2
+
+# 交易日換算成日曆天的粗略倍數（一週 5 個交易日 / 7 天），再多留一點緩衝
+TRADING_DAY_TO_CALENDAR = 1.6
+
+
+def _max_sequence_length(models: list[PredictionModel]) -> int:
+    """這批模型裡最長的視窗長度；沒有序列模型就回 0。"""
+    lengths = [
+        int((m.network_config or {}).get("sequence_length") or DEFAULT_SEQUENCE_LENGTH)
+        for m in models
+        if m.model_type in SEQUENCE_MODEL_TYPES
+    ]
+    return max(lengths) if lengths else 0
 
 
 def get_active_models(db: Session) -> list[PredictionModel]:
@@ -38,7 +53,20 @@ def get_active_models(db: Session) -> list[PredictionModel]:
 
 
 def latest_bar_date(db: Session) -> date | None:
-    return db.query(DailyBar.trade_date).order_by(DailyBar.trade_date.desc()).limit(1).scalar()
+    """本地日K最新的**上市**交易日。
+
+    一定要限定 TWSE：這個系統只做上市股票，但 daily_bars 裡還有上櫃資料，而兩邊
+    的同步時間不一定同步。上櫃先進來、上市還沒進來時，不限定市場會回傳一個
+    「對這個系統來說根本沒有資料」的日期，當日選股就會整批被略過。
+    """
+    return (
+        db.query(DailyBar.trade_date)
+        .join(Stock, Stock.code == DailyBar.stock_code)
+        .filter(Stock.market == Market.TWSE)
+        .order_by(DailyBar.trade_date.desc())
+        .limit(1)
+        .scalar()
+    )
 
 
 def _score_one_model(
@@ -46,10 +74,20 @@ def _score_one_model(
     model: PredictionModel,
     today: date,
     rows_today: list[dict],
+    all_rows: list[dict],
     bars_by_code: dict[str, list[DailyBar]],
 ) -> int:
-    """跑單一模型的當日循環，回傳這次的異動筆數（出場 + 進場）。"""
+    """跑單一模型的當日循環，回傳這次的異動筆數（出場 + 進場）。
+
+    all_rows 含今天之前那段歷史，只有序列模型會用到。
+    """
     bundle = artifacts.load_bundle(model.model_artifact_path)
+
+    if bundle.sequence_length:
+        # 每個模型的特徵欄位與順序可能不同，序列矩陣的欄位順序必須跟該模型
+        # 訓練當下一致，所以索引要用這個 bundle 自己的 feature_keys 重建，
+        # 不能讓多個模型共用同一份。
+        index_feature_rows(all_rows, bundle.feature_keys)
 
     holdings = (
         db.query(ModelHolding)
@@ -116,8 +154,15 @@ def run_daily_scoring(db: Session, today: date | None = None) -> int:
         logger.warning("run_daily_scoring: 本地沒有任何日K資料，略過")
         return 0
 
-    fetch_start = today - timedelta(days=WARMUP_CALENDAR_DAYS)
-    rows, bars_by_code = build_feature_rows(db, fetch_start, today, today)
+    # 序列模型要看今天之前連續 T 天的特徵，所以特徵列不能只產出今天這一天。
+    # 取所有啟用中模型裡最長的那個視窗，一次撈足，全部模型共用同一份。
+    max_sequence = _max_sequence_length(models)
+    feature_start = today
+    if max_sequence:
+        feature_start -= timedelta(days=int(max_sequence * TRADING_DAY_TO_CALENDAR) + 7)
+
+    fetch_start = feature_start - timedelta(days=WARMUP_CALENDAR_DAYS)
+    rows, bars_by_code = build_feature_rows(db, fetch_start, today, feature_start)
     rows_today = [row for row in rows if row["as_of_date"] == today]
     if not rows_today:
         logger.warning("run_daily_scoring: %s 沒有可用的特徵列（可能不是交易日或資料未同步），略過", today)
@@ -135,7 +180,7 @@ def run_daily_scoring(db: Session, today: date | None = None) -> int:
 
         started = time.perf_counter()
         try:
-            _score_one_model(db, model, today, rows_today, bars_by_code)
+            _score_one_model(db, model, today, rows_today, rows, bars_by_code)
             status, error = "success", None
         except Exception as e:
             logger.exception("模型 %d 當日選股失敗", model.id)
