@@ -26,6 +26,34 @@ FLAG_LABELS: dict[str, str] = {
 
 FLAG_KEYS = list(FLAG_LABELS.keys())
 
+# 只有這三個排程跟預測模型系統有關，管理後台只顯示這些——其餘的（撮合輪詢、
+# 策略輪詢、績效快照）都是舊模擬器留下來的，對這個系統沒有意義。
+MODEL_SYSTEM_FLAGS = [
+    SCHEDULER_DAILY_STOCK_SYNC,
+    SCHEDULER_DAILY_BAR_BACKFILL,
+    SCHEDULER_MODEL_SCORING,
+]
+
+# 關掉一個排程會發生什麼事，要講清楚——不然沒人敢動，或動了才發現後果
+FLAG_DESCRIPTIONS: dict[str, str] = {
+    SCHEDULER_DAILY_STOCK_SYNC: "每天 08:30 更新股票清單並寫入最新一筆日K。關掉的話模型會拿不到當天的收盤資料。",
+    SCHEDULER_DAILY_BAR_BACKFILL: "每天 07:00 往前補歷史日K，補到設定的目標月數為止。關掉不影響既有資料，只是不再往前補。",
+    SCHEDULER_MODEL_SCORING: "每個交易日 15:00 讓所有啟用中的模型選股與判斷出場。關掉的話模型不會再開新部位，手上的部位也不會出場。",
+}
+
+
+def get_model_system_flags(db: Session) -> list[dict]:
+    rows = {f.key: f.enabled for f in db.query(FeatureFlag).all()}
+    return [
+        {
+            "key": key,
+            "label": FLAG_LABELS[key],
+            "description": FLAG_DESCRIPTIONS.get(key, ""),
+            "enabled": rows.get(key, True),
+        }
+        for key in MODEL_SYSTEM_FLAGS
+    ]
+
 
 def ensure_feature_flags(db: Session) -> None:
     existing = {f.key for f in db.query(FeatureFlag).all()}

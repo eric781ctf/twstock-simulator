@@ -313,6 +313,36 @@ button.submit:disabled {
   color: var(--buy);
 }
 
+.scheduler-flag-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.scheduler-flag-row:last-child {
+  border-bottom: none;
+}
+
+.scheduler-flag-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.scheduler-flag-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.scheduler-flag-desc {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
 .backfill-progress {
   border: 1px solid var(--border);
   border-radius: 8px;

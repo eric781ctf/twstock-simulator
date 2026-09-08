@@ -24,6 +24,7 @@ import type {
   PricePoint,
   Quote,
   RealizedPnlSummary,
+  SchedulerFlag,
   Stock,
   Strategy,
   StrategyInput,
@@ -151,6 +152,7 @@ export const api = {
   getDailyBarStats: () => request<DailyBarStats>("/admin/daily-bar-stats"),
 
   getBackfillStatus: () => request<BackfillStatus>("/admin/models/backfill-status"),
+  getModelSchedulers: () => request<SchedulerFlag[]>("/admin/models/schedulers"),
   triggerBackfill: (targetMonths: number) =>
     request<BackfillStatus>("/admin/models/backfill", {
       method: "POST",

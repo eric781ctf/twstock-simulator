@@ -141,7 +141,7 @@ class BackfillProgressOut(BaseModel):
 
     phase: str
     phase_label: str
-    current_stock_code: str | None
+    current_target: str | None
     processed: int
     total: int
     remaining_targets: int
@@ -340,6 +340,16 @@ class FeatureFlagOut(BaseModel):
 
 
 class FeatureFlagUpdateIn(BaseModel):
+    enabled: bool
+
+
+class SchedulerFlagOut(BaseModel):
+    """模型系統相關的排程開關。description 說明「關掉會發生什麼」，
+    不然管理者只看得到一個名字，不敢動也不知道動了會怎樣。"""
+
+    key: str
+    label: str
+    description: str
     enabled: bool
 
 

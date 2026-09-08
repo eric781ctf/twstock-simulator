@@ -44,7 +44,7 @@ PHASE_LABELS: dict[str, str] = {
 @dataclass
 class BackfillState:
     phase: str = PHASE_IDLE
-    current_stock_code: str | None = None
+    current_target: str | None = None
     processed: int = 0
     total: int = 0
     remaining_targets: int = 0
@@ -73,7 +73,7 @@ def snapshot() -> dict:
     return {
         "phase": _state.phase,
         "phase_label": PHASE_LABELS.get(_state.phase, _state.phase),
-        "current_stock_code": _state.current_stock_code,
+        "current_target": _state.current_target,
         "processed": _state.processed,
         "total": _state.total,
         "remaining_targets": _state.remaining_targets,
@@ -101,9 +101,9 @@ def set_batch(total: int, remaining_targets: int) -> None:
     _state.remaining_targets = remaining_targets
 
 
-def set_running(stock_code: str, processed: int, written_bars: int) -> None:
+def set_running(target: str, processed: int, written_bars: int) -> None:
     _state.phase = PHASE_RUNNING
-    _state.current_stock_code = stock_code
+    _state.current_target = target
     _state.processed = processed
     _state.written_bars = written_bars
     _state.wait_until = None
@@ -119,7 +119,7 @@ def begin_wait(seconds: float, reason: str) -> None:
 def finish(phase: str, message: str | None = None) -> None:
     _state.phase = phase
     _state.message = message
-    _state.current_stock_code = None
+    _state.current_target = None
     _state.wait_until = None
     _state.wait_reason = None
     _state.finished_at = datetime.now(TAIPEI_TZ)

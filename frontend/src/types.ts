@@ -136,7 +136,7 @@ export type BackfillPhase =
 export interface BackfillProgress {
   phase: BackfillPhase;
   phase_label: string;
-  current_stock_code: string | null;
+  current_target: string | null;
   processed: number;
   total: number;
   remaining_targets: number;
@@ -297,6 +297,13 @@ export interface ModelSummary {
   closed_holding_count: number;
   average_realized_return_percent: number | null;
   average_unrealized_return_percent: number | null;
+}
+
+export interface SchedulerFlag {
+  key: string;
+  label: string;
+  description: string;
+  enabled: boolean;
 }
 
 export interface FeatureFlag {
