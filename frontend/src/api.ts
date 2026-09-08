@@ -14,6 +14,7 @@ import type {
   LeaderboardEntry,
   MarketSession,
   ModelDetail,
+  ModelCatalog,
   ModelSummary,
   ModelTrainRequest,
   Order,
@@ -159,6 +160,7 @@ export const api = {
       body: JSON.stringify({ target_months: targetMonths }),
     }),
 
+  getModelCatalog: () => request<ModelCatalog>("/models/catalog"),
   getPublicModels: () => request<ModelSummary[]>("/models"),
   getPublicModel: (id: number) => request<ModelDetail>(`/models/${id}`),
 

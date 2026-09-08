@@ -12,9 +12,6 @@ interface Props {
  * 不然改了實作卻忘了改說明，頁面就會騙人。
  */
 export function ScoreFormulaExplainer({ info, weights }: Props) {
-  const w1 = weights?.return ?? 0.5;
-  const w2 = weights?.probability ?? 0.5;
-
   return (
     <div className="formula-explainer">
       <div className="formula-explainer-head">
@@ -25,8 +22,15 @@ export function ScoreFormulaExplainer({ info, weights }: Props) {
       <div className="formula-box">
         <div className="formula-main">{info.formula}</div>
         <div className="formula-def">{info.definition}</div>
+        {/* 教學頁沒有「某一個模型」可以講，這時不能顯示假的目前權重 */}
         <div className="formula-weights">
-          目前權重：w₁（預期報酬）= <b>{w1}</b>　w₂（達標機率）= <b>{w2}</b>
+          {weights ? (
+            <>
+              目前權重：w₁（預期報酬）= <b>{weights.return}</b>　w₂（達標機率）= <b>{weights.probability}</b>
+            </>
+          ) : (
+            <>w₁、w₂ 兩個權重由 admin 在訓練每個模型時各自設定，會顯示在該模型的詳情頁上。</>
+          )}
         </div>
       </div>
 

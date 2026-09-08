@@ -696,6 +696,45 @@ tbody tr:hover {
   background: var(--buy);
 }
 
+.network-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  margin-bottom: 14px;
+}
+
+.network-meta .stat {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.network-meta .stat .label {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.network-meta .stat .value {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.network-table td.mono {
+  font-family: var(--font-mono);
+  color: var(--accent);
+}
+
+.network-total-row td {
+  border-top: 1px solid var(--border-strong);
+  font-weight: 700;
+}
+
+.network-preview {
+  font-family: var(--font-mono);
+  color: var(--accent);
+}
+
 .formula-explainer {
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -2176,4 +2215,21 @@ tbody tr:hover {
     min-width: 480px;
     font-size: 12px;
   }
+}
+
+/* 模型教學：模型特性標籤（需要 GPU、吃序列…） */
+.model-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 4px;
+}
+
+.model-badge {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--muted);
 }

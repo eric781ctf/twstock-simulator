@@ -154,7 +154,51 @@ export interface BackfillStatus {
   progress: BackfillProgress;
 }
 
-export type ModelType = "xgboost" | "lightgbm" | "random_forest" | "logistic_regression";
+export type ModelType =
+  | "xgboost"
+  | "lightgbm"
+  | "random_forest"
+  | "logistic_regression"
+  | "mlp"
+  | "gru"
+  | "lstm";
+export type Activation = "relu" | "tanh" | "gelu";
+
+export interface NetworkLayer {
+  name: string;
+  type: string;
+  output_shape: string;
+  params: number;
+}
+
+export interface LossCurvePoint {
+  epoch: number;
+  train_loss: number;
+  validation_loss: number;
+}
+
+export interface NetworkInfo {
+  layers: NetworkLayer[];
+  total_params: number;
+  loss_curve: LossCurvePoint[];
+  device: string;
+  epochs: number;
+  hidden_sizes: number[];
+  activation: string;
+  dropout: number;
+  /** 只有 GRU/LSTM 有：一個樣本往回看幾個交易日 */
+  sequence_length: number | null;
+  kind: string | null;
+}
+
+export interface NetworkConfigInput {
+  hidden_sizes: number[];
+  activation: Activation;
+  dropout: number;
+  learning_rate: number;
+  epochs: number;
+  sequence_length: number;
+}
 export type ScoreFormula = "multiply" | "zscore_weighted";
 export type ModelStatus = "queued" | "training" | "completed" | "failed";
 
@@ -166,6 +210,8 @@ export interface FeatureOption {
 export interface ModelTypeOption {
   key: ModelType;
   label: string;
+  is_neural: boolean;
+  is_sequence: boolean;
 }
 
 export interface ScoreFormulaInfo {
@@ -199,6 +245,7 @@ export interface ModelTrainRequest {
   n_days: number;
   threshold_percent: number;
   score_weights?: { return: number; probability: number } | null;
+  network_config?: NetworkConfigInput | null;
   min_hold_days?: number | null;
   max_hold_days?: number | null;
   stop_loss_percent?: number | null;
@@ -279,6 +326,7 @@ export interface ModelDetail {
   test_end: string;
   metrics: Record<string, any> | null;
   warnings: string[];
+  network: NetworkInfo | null;
   regression_points: ModelPredictionPoint[];
   calibration_buckets: CalibrationBucket[];
   backtest_trades: BacktestTradePoint[];
@@ -472,4 +520,15 @@ export interface BacktestResult {
   win_rate: number | null;
   equity_curve: EquityCurvePoint[];
   warning: string | null;
+}
+
+/** 模型教學頁的資料來源。內容全部來自後端實作，前端不自己抄一份系統設定。 */
+export interface ModelCatalog {
+  model_types: ModelTypeOption[];
+  score_formula: ScoreFormulaInfo;
+  features: FeatureOption[];
+  /** 每天最多持有幾檔 */
+  top_n: number;
+  commission_rate: number;
+  tax_rate: number;
 }

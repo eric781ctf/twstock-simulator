@@ -10,27 +10,65 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.database import get_db
 from app.models import ModelHolding, ModelPrediction, ModelScoringRun, PredictionModel, Stock
 from app.schemas import (
     BacktestTradePointOut,
     CalibrationBucketOut,
     FeatureImportanceOut,
+    FeatureOptionOut,
+    ModelCatalogOut,
     ModelDetailOut,
     ModelHoldingOut,
     ModelPredictionPointOut,
     ModelSummaryOut,
+    ModelTypeOptionOut,
+    NetworkInfoOut,
     ScoreFormulaInfoOut,
     ScoringRunOut,
 )
 from app.services.ml.exit_rules import net_return_percent
-from app.services.ml.features import FEATURE_LABELS
-from app.services.ml.train import SCORE_FORMULA_INFO
+from app.services.ml.features import FEATURE_KEYS, FEATURE_LABELS
+from app.services.ml.selection import TOP_N
+from app.services.ml.train import (
+    MODEL_TYPE_LABELS,
+    MODEL_TYPES,
+    NEURAL_MODEL_TYPES,
+    SCORE_FORMULA_INFO,
+    SEQUENCE_MODEL_TYPES,
+)
 from app.services.ml.performance import latest_close_prices, summarize_holdings
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/models", tags=["public-models"])
+
+
+@router.get("/catalog", response_model=ModelCatalogOut)
+def get_catalog():
+    """模型教學頁要用的「這個系統實際怎麼運作」清單。
+
+    模型類型、選股分數公式、每天持有幾檔、手續費率全部從後端實作直接取，
+    前端不自己抄一份——不然之後加了新模型類型或改了費率，教學頁會悄悄變成
+    在講一個已經不存在的系統。
+    """
+    return ModelCatalogOut(
+        model_types=[
+            ModelTypeOptionOut(
+                key=key,
+                label=MODEL_TYPE_LABELS[key],
+                is_neural=key in NEURAL_MODEL_TYPES,
+                is_sequence=key in SEQUENCE_MODEL_TYPES,
+            )
+            for key in MODEL_TYPES
+        ],
+        score_formula=ScoreFormulaInfoOut(**SCORE_FORMULA_INFO),
+        features=[FeatureOptionOut(key=key, label=FEATURE_LABELS[key]) for key in FEATURE_KEYS],
+        top_n=TOP_N,
+        commission_rate=settings.commission_rate,
+        tax_rate=settings.tax_rate,
+    )
 
 # 散佈圖上限：測試集動輒兩萬筆，全部丟給瀏覽器畫既慢又看不出東西，
 # 均勻抽樣後形狀一樣看得出來
@@ -219,6 +257,7 @@ def get_public_model(model_id: int, db: Session = Depends(get_db)):
         test_end=model.test_end,
         metrics=metrics,
         warnings=metrics.get("warnings", []),
+        network=NetworkInfoOut(**metrics["network"]) if metrics.get("network") else None,
         regression_points=regression_points,
         calibration_buckets=_calibration(predictions),
         backtest_trades=backtest_trades,

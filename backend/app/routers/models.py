@@ -25,7 +25,14 @@ from app.services.auth import require_admin
 from app.services.ml.features import DEFAULT_FEATURES, FEATURE_KEYS, FEATURE_LABELS
 from app.services.ml.inference import latest_bar_date
 from app.services.ml.performance import summarize_holdings
-from app.services.ml.train import MODEL_TYPE_LABELS, MODEL_TYPES, SCORE_FORMULA_INFO, SCORE_FORMULA_KEY
+from app.services.ml.train import (
+    MODEL_TYPE_LABELS,
+    MODEL_TYPES,
+    NEURAL_MODEL_TYPES,
+    SEQUENCE_MODEL_TYPES,
+    SCORE_FORMULA_INFO,
+    SCORE_FORMULA_KEY,
+)
 from app.services.ml.training_runner import run_training_job, suggest_split_dates
 from app.services.strategy_conditions import ConditionValidationError, validate_conditions
 
@@ -42,7 +49,15 @@ def get_train_defaults(db: Session = Depends(get_db), _: User = Depends(require_
         **suggest_split_dates(latest),
         default_features=DEFAULT_FEATURES,
         features=[FeatureOptionOut(key=key, label=FEATURE_LABELS[key]) for key in FEATURE_KEYS],
-        model_types=[ModelTypeOptionOut(key=key, label=MODEL_TYPE_LABELS[key]) for key in MODEL_TYPES],
+        model_types=[
+            ModelTypeOptionOut(
+                key=key,
+                label=MODEL_TYPE_LABELS[key],
+                is_neural=key in NEURAL_MODEL_TYPES,
+                is_sequence=key in SEQUENCE_MODEL_TYPES,
+            )
+            for key in MODEL_TYPES
+        ],
         score_formula=ScoreFormulaInfoOut(**SCORE_FORMULA_INFO),
     )
 
@@ -104,6 +119,7 @@ async def create_model(
         threshold_percent=payload.threshold_percent,
         score_formula=SCORE_FORMULA_KEY,
         score_weights=payload.score_weights,
+        network_config=payload.network_config.model_dump() if payload.network_config else None,
         min_hold_days=payload.min_hold_days,
         max_hold_days=payload.max_hold_days,
         stop_loss_percent=payload.stop_loss_percent,

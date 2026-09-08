@@ -14,6 +14,7 @@ import time
 from concurrent.futures import ProcessPoolExecutor
 from datetime import date, datetime, timedelta
 
+import numpy as np
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
@@ -21,10 +22,17 @@ from app.models import PredictionModel
 from app.services.matching import TAIPEI_TZ
 from app.services.ml import artifacts
 from app.services.ml.backtest_eval import run_backtest
-from app.services.ml.dataset import apply_scaler, attach_labels, fit_scaler, split_by_date, to_matrix
+from app.services.ml.dataset import (
+    apply_scaler,
+    attach_labels,
+    fit_scaler,
+    fit_scaler_sequences,
+    split_by_date,
+    to_matrix,
+)
 from app.services.ml.features import WARMUP_BARS, build_feature_rows
 from app.services.ml.selection import ModelBundle
-from app.services.ml.train import train_dual_task
+from app.services.ml.train import SEQUENCE_MODEL_TYPES, train_dual_task
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +40,9 @@ _executor: ProcessPoolExecutor | None = None
 
 # 暖身需要的日曆天數：60 個交易日約等於 90 個日曆天，多抓一些緩衝
 WARMUP_CALENDAR_DAYS = WARMUP_BARS * 2
+
+# 交易日換算成日曆天的粗略倍數（一週 5 個交易日 / 7 天），再多留一點緩衝
+TRADING_DAY_TO_CALENDAR = 1.6
 
 
 def _init_worker() -> None:
@@ -60,6 +71,23 @@ def shutdown_executor() -> None:
         _executor = None
 
 
+def _sequence_length_for(model: PredictionModel) -> int | None:
+    """序列模型才有視窗長度；其他類型一律 None（下游用它來判斷要走哪條路）。"""
+    if model.model_type not in SEQUENCE_MODEL_TYPES:
+        return None
+    from app.services.ml.sequences import DEFAULT_SEQUENCE_LENGTH
+
+    config = model.network_config or {}
+    return int(config.get("sequence_length") or DEFAULT_SEQUENCE_LENGTH)
+
+
+def _labels(rows: list[dict]) -> tuple[np.ndarray, np.ndarray]:
+    """序列模型的 X 由 stack_sequences 組，但 label 還是逐列來的，另外抽出來。"""
+    y_reg = np.array([row["future_return_percent"] for row in rows], dtype=np.float64)
+    y_clf = np.array([row["label"] for row in rows], dtype=np.int64)
+    return y_reg, y_clf
+
+
 def _train_sync(model_id: int) -> dict:
     """真正做事的地方，跑在獨立的 process 裡，所以自己開資料庫連線。"""
     db: Session = SessionLocal()
@@ -72,16 +100,39 @@ def _train_sync(model_id: int) -> dict:
         model.status = "training"
         db.commit()
 
-        fetch_start = model.train_start - timedelta(days=WARMUP_CALENDAR_DAYS)
-        rows, bars_by_code = build_feature_rows(db, fetch_start, model.test_end, model.train_start)
+        feature_keys = list(model.feature_config)
+        sequence_length = _sequence_length_for(model)
+
+        # 序列模型要能回頭看 T 天，所以特徵列得從訓練起始日之前就開始產出——
+        # 不然訓練期最前面那 T-1 天會因為湊不出完整視窗而整批被丟掉。
+        feature_start = model.train_start
+        if sequence_length:
+            feature_start -= timedelta(days=int(sequence_length * TRADING_DAY_TO_CALENDAR) + 7)
+
+        fetch_start = feature_start - timedelta(days=WARMUP_CALENDAR_DAYS)
+        rows, bars_by_code = build_feature_rows(db, fetch_start, model.test_end, feature_start)
+
+        if sequence_length:
+            # 索引要在切分之前、對「完整的」特徵列做，早於訓練起始日的那些列
+            # 不會成為訓練目標，但要留著當歷史用
+            from app.services.ml.sequences import index_feature_rows
+
+            index_feature_rows(rows, feature_keys)
+
         labeled = attach_labels(rows, bars_by_code, model.n_days, model.threshold_percent)
         if not labeled:
             raise ValueError("這段期間沒有足夠的本地日K資料可以組出訓練樣本，請先回補更多歷史或調整日期區間")
 
-        feature_keys = list(model.feature_config)
         train_rows = split_by_date(labeled, model.train_start, model.train_end)
         validation_rows = split_by_date(labeled, model.validation_start, model.validation_end)
         test_rows = split_by_date(labeled, model.test_start, model.test_end)
+
+        if sequence_length:
+            from app.services.ml.sequences import filter_rows_with_history
+
+            train_rows = filter_rows_with_history(train_rows, sequence_length)
+            validation_rows = filter_rows_with_history(validation_rows, sequence_length)
+            test_rows = filter_rows_with_history(test_rows, sequence_length)
 
         if not train_rows:
             raise ValueError("訓練區間沒有任何樣本，請往前調整訓練起始日或先回補更多歷史")
@@ -90,11 +141,21 @@ def _train_sync(model_id: int) -> dict:
         if not test_rows:
             raise ValueError("測試區間沒有任何樣本，請調整測試日期區間")
 
-        x_train_raw, y_train_reg, y_train_clf = to_matrix(train_rows, feature_keys)
-        x_validation_raw, y_validation_reg, y_validation_clf = to_matrix(validation_rows, feature_keys)
+        y_train_reg, y_train_clf = _labels(train_rows)
+        y_validation_reg, y_validation_clf = _labels(validation_rows)
 
         # 標準化參數只用訓練集算，再套用到驗證/測試，避免測試集的分布洩漏進訓練
-        scaler_mean, scaler_std = fit_scaler(x_train_raw)
+        if sequence_length:
+            from app.services.ml.sequences import stack_sequences
+
+            x_train_raw = stack_sequences(train_rows, sequence_length)
+            x_validation_raw = stack_sequences(validation_rows, sequence_length)
+            scaler_mean, scaler_std = fit_scaler_sequences(x_train_raw)
+        else:
+            x_train_raw, y_train_reg, y_train_clf = to_matrix(train_rows, feature_keys)
+            x_validation_raw, y_validation_reg, y_validation_clf = to_matrix(validation_rows, feature_keys)
+            scaler_mean, scaler_std = fit_scaler(x_train_raw)
+
         x_train = apply_scaler(x_train_raw, scaler_mean, scaler_std)
         x_validation = apply_scaler(x_validation_raw, scaler_mean, scaler_std)
 
@@ -107,10 +168,11 @@ def _train_sync(model_id: int) -> dict:
             x_validation,
             y_validation_reg,
             y_validation_clf,
+            network_config=model.network_config,
         )
 
         artifact_path = artifacts.save_bundle(
-            model.id, regressor, classifier, feature_keys, scaler_mean, scaler_std
+            model.id, regressor, classifier, feature_keys, scaler_mean, scaler_std, sequence_length
         )
         bundle = ModelBundle(
             regressor=regressor,
@@ -118,15 +180,26 @@ def _train_sync(model_id: int) -> dict:
             feature_keys=feature_keys,
             scaler_mean=scaler_mean,
             scaler_std=scaler_std,
+            sequence_length=sequence_length,
         )
 
         from app.services.ml.train import build_data_warnings, evaluate
 
-        x_test_raw, y_test_reg, y_test_clf = to_matrix(test_rows, feature_keys)
+        if sequence_length:
+            from app.services.ml.sequences import stack_sequences
+
+            y_test_reg, y_test_clf = _labels(test_rows)
+            x_test_raw = stack_sequences(test_rows, sequence_length)
+        else:
+            x_test_raw, y_test_reg, y_test_clf = to_matrix(test_rows, feature_keys)
         x_test = apply_scaler(x_test_raw, scaler_mean, scaler_std)
         metrics["test"] = evaluate(regressor, classifier, x_test, y_test_reg, y_test_clf)
+        del x_train, x_validation, x_test, x_train_raw, x_validation_raw, x_test_raw
+
         metrics["backtest"] = run_backtest(db, model, bundle, test_rows, bars_by_code)
-        metrics["warnings"] = build_data_warnings(metrics["train"], metrics["validation"], metrics["test"])
+        metrics["warnings"] = build_data_warnings(
+            metrics["train"], metrics["validation"], metrics["test"], metrics.get("network")
+        )
 
         model.metrics = metrics
         model.model_artifact_path = artifact_path

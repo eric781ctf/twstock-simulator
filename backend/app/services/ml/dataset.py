@@ -95,5 +95,23 @@ def fit_scaler(x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
 
 def apply_scaler(x: np.ndarray, mean: np.ndarray, std: np.ndarray) -> np.ndarray:
+    """標準化。x 可以是 (N, F) 或序列模型的 (N, T, F)——最後一維都是特徵，
+    numpy 的 broadcasting 會自動對到，所以兩種形狀共用同一份實作。
+
+    mean/std 先轉成跟 x 一樣的精度，輸出才不會被無聲地升成 float64。序列資料
+    動輒數百 MB，白白升一倍精度只是浪費記憶體——反正送進 torch 時還是會被
+    轉回 float32。
+    """
+    mean = np.asarray(mean, dtype=x.dtype)
+    std = np.asarray(std, dtype=x.dtype)
     filled = np.where(np.isnan(x), mean, x)
     return (filled - mean) / std
+
+
+def fit_scaler_sequences(x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """序列版的 fit_scaler：把 (N, T, F) 攤平成 (N×T, F) 再算。
+
+    刻意用整個視窗而不是只用最後一天來算 mean/std——網路每個時間步看到的都是
+    標準化過的值，基準當然要涵蓋所有時間步。
+    """
+    return fit_scaler(x.reshape(-1, x.shape[-1]))
