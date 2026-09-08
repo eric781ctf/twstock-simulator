@@ -35,17 +35,17 @@ NEURAL_MODEL_TYPES = ["mlp", "gru", "lstm"]
 # 吃「連續 T 天的視窗」而不是「某一天的一列」的模型；表單會多一個序列長度欄位
 SEQUENCE_MODEL_TYPES = ["gru", "lstm"]
 
-# 名稱一律「英文（中文）」：這些演算法的通用名稱就是英文，中文譯名只是輔助辨識。
-# 「需要 GPU」「吃連續 N 天序列」這類特性不寫進名稱裡——那是 is_neural /
+# 名稱一律只寫英文：這些演算法的通用名稱就是英文，中文譯名反而各家不一。
+# 「需要 GPU」「吃連續 N 天序列」這類特性也不寫進名稱裡——那是 is_neural /
 # is_sequence 兩個旗標的職責，前端據此顯示，才不會有一天旗標改了名稱卻沒改。
 MODEL_TYPE_LABELS: dict[str, str] = {
-    "xgboost": "XGBoost（梯度提升樹）",
-    "lightgbm": "LightGBM（梯度提升樹）",
-    "random_forest": "Random Forest（隨機森林）",
-    "logistic_regression": "Logistic / Linear Regression（邏輯迴歸 / 線性迴歸）",
-    "mlp": "MLP（多層感知器）",
-    "gru": "GRU（閘控循環單元）",
-    "lstm": "LSTM（長短期記憶網路）",
+    "xgboost": "XGBoost",
+    "lightgbm": "LightGBM",
+    "random_forest": "Random Forest",
+    "logistic_regression": "Logistic / Linear Regression",
+    "mlp": "MLP",
+    "gru": "GRU",
+    "lstm": "LSTM",
 }
 
 

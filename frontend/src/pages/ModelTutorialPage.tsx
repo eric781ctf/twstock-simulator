@@ -24,30 +24,30 @@ interface Family {
   types: ModelType[];
 }
 
-// 名稱一律「英文（中文）」，跟後端的模型名稱一致——這些都是英文為通用名稱的
-// 演算法類別，中文譯名只是輔助辨識
+// 名稱一律只寫英文，跟後端的模型名稱一致。這些演算法類別的通用名稱就是英文，
+// 中文譯名各家不一（ensemble 就有「集成」「整體」等好幾種講法），寫了反而更亂
 const FAMILIES: Family[] = [
   {
     key: "tree",
-    label: "Tree Ensembles（樹模型集成）",
+    label: "Tree Ensembles",
     summary: "很多棵決策樹投票／相加。表格式資料上長年的實務首選。",
     types: ["xgboost", "lightgbm", "random_forest"],
   },
   {
     key: "linear",
-    label: "Linear Models（線性模型）",
+    label: "Linear Models",
     summary: "把每個特徵乘上一個係數再加起來。最單純、也最容易解釋。",
     types: ["logistic_regression"],
   },
   {
     key: "feedforward",
-    label: "Feedforward Neural Network（前饋神經網路）",
+    label: "Feedforward Neural Network",
     summary: "多層非線性轉換，能學到特徵之間的交互作用。需要 GPU。",
     types: ["mlp"],
   },
   {
     key: "recurrent",
-    label: "Recurrent Neural Network（循環神經網路）",
+    label: "Recurrent Neural Network",
     summary: "吃「一段連續期間」而不是「某一天」，由網路自己看時間上的變化。需要 GPU。",
     types: ["gru", "lstm"],
   },
@@ -151,7 +151,7 @@ const ARTICLES: Partial<Record<ModelType, ModelArticle>> = {
   mlp: {
     tagline: "第一個真正共享 encoder 的類型：兩個任務共用同一組隱藏層。",
     theory: [
-      "多層感知器把輸入特徵經過數層「線性轉換 + 非線性啟用函數」的堆疊。每一層都在把資料投影到一個新的空間，讓原本糾纏在一起的樣本逐漸變得可分。",
+      "MLP 是 Multilayer Perceptron（多層感知器）的縮寫。它把輸入特徵經過數層「線性轉換 + 非線性啟用函數」的堆疊。每一層都在把資料投影到一個新的空間，讓原本糾纏在一起的樣本逐漸變得可分。",
       "非線性啟用函數（ReLU、Tanh、GELU）是關鍵：少了它，疊再多層線性轉換的結果仍然只是一個線性轉換，等於白疊。",
       "訓練用反向傳播——先算出預測跟答案的誤差，再依鏈鎖律把「每個權重該調多少」一路往回推，然後用 Adam 這類最佳化器更新。Dropout 在訓練時隨機關掉一部分神經元，強迫網路不能只依賴少數幾條路徑。",
       "這裡的雙任務是真的共享：同一組隱藏層之後接兩個輸出頭，兩個任務的梯度會一起更新那組共享層。這跟樹模型「訓練兩個獨立模型」有本質差別。",
@@ -174,7 +174,7 @@ const ARTICLES: Partial<Record<ModelType, ModelArticle>> = {
   gru: {
     tagline: "吃「連續 N 天」而不是「某一天」。用閘控機制決定要記住還是忘掉。",
     theory: [
-      "循環神經網路依序讀入序列裡的每一個時間步，並維持一個「隱藏狀態」把先前看過的東西濃縮起來帶著走。讀完整段之後，最後一個時間步的狀態就是對這段歷史的總結。",
+      "GRU 是 Gated Recurrent Unit（閘控循環單元）的縮寫。循環神經網路依序讀入序列裡的每一個時間步，並維持一個「隱藏狀態」把先前看過的東西濃縮起來帶著走。讀完整段之後，最後一個時間步的狀態就是對這段歷史的總結。",
       "最原始的 RNN 有梯度消失問題：誤差往回傳好幾十步之後會衰減到幾乎為零，等於學不到比較久以前的影響。GRU 用兩個閘來解決：更新閘決定「這一步要保留多少舊狀態、吸收多少新資訊」，重置閘決定「算新候選狀態時要參考多少舊狀態」。",
       "閘的值是網路自己學出來的（0~1 之間），所以它可以學會「這段期間沒什麼事，狀態原封不動帶過去」，梯度也就能沿著這條路徑順利回傳。",
       "跟前面所有類型最大的差別：它不需要我們預先算好「5日乖離率」「20日累積漲跌幅」這種彙總特徵，理論上能自己從原始序列裡看出變化的形狀。",
@@ -197,7 +197,7 @@ const ARTICLES: Partial<Record<ModelType, ModelArticle>> = {
   lstm: {
     tagline: "循環神經網路裡最經典的一支。比 GRU 多一個閘與一條獨立的記憶線。",
     theory: [
-      "LSTM 比 GRU 多維護一條東西：除了隱藏狀態，還有一條獨立的「細胞狀態」，可以想成一條專門用來長期攜帶資訊的輸送帶。",
+      "LSTM 是 Long Short-Term Memory（長短期記憶）的縮寫。它比 GRU 多維護一條東西：除了隱藏狀態，還有一條獨立的「細胞狀態」，可以想成一條專門用來長期攜帶資訊的輸送帶。",
       "三個閘各司其職：遺忘閘決定細胞狀態裡哪些舊資訊該丟掉，輸入閘決定這一步有哪些新資訊值得寫進去，輸出閘決定細胞狀態裡有多少要洩漏成這一步的隱藏狀態輸出。",
       "細胞狀態的更新主要是「乘上遺忘閘再加上新資訊」這種加法形式，梯度沿著它回傳時不會反覆被權重矩陣連乘，這正是它能記住比較長期依賴的原因。",
     ],
@@ -247,7 +247,7 @@ export default function ModelTutorialPage() {
     if (rest.length > 0) {
       known.push({
         key: "other",
-        label: "Other（其他）",
+        label: "Other",
         summary: "後端新增、但這一頁還沒補上分類的模型類型。",
         types: [],
         options: rest,

@@ -264,7 +264,7 @@ export default function AdminModelsPage() {
             <>
               <h3 className="tutorial-heading">網路結構</h3>
               <p className="order-hint">
-                只有神經網路類型有「層」的概念（樹模型是一堆決策樹的集成，沒有層）。
+                只有神經網路類型有「層」的概念（樹模型是一堆決策樹合起來投票，沒有層）。
                 這裡設定的是共享 encoder 的結構——兩個輸出頭（預期報酬、達標機率）會接在最後一層之後，
                 共用同一組隱藏層一起訓練。訓練一律使用 GPU，沒有可用的 GPU 會直接失敗。
               </p>
