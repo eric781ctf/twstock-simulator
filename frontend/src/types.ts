@@ -521,3 +521,14 @@ export interface BacktestResult {
   equity_curve: EquityCurvePoint[];
   warning: string | null;
 }
+
+/** 模型教學頁的資料來源。內容全部來自後端實作，前端不自己抄一份系統設定。 */
+export interface ModelCatalog {
+  model_types: ModelTypeOption[];
+  score_formula: ScoreFormulaInfo;
+  features: FeatureOption[];
+  /** 每天最多持有幾檔 */
+  top_n: number;
+  commission_rate: number;
+  tax_rate: number;
+}

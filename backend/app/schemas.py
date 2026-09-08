@@ -224,6 +224,18 @@ class NetworkConfigIn(BaseModel):
         return self
 
 
+class ModelCatalogOut(BaseModel):
+    """模型教學頁的資料來源：這個系統「實際上」支援哪些模型、用什麼公式選股、
+    每天持有幾檔、費率多少。全部取自後端實作，教學頁才不會跟實作走鐘。"""
+
+    model_types: list["ModelTypeOptionOut"]
+    score_formula: "ScoreFormulaInfoOut"
+    features: list["FeatureOptionOut"]
+    top_n: int
+    commission_rate: float
+    tax_rate: float
+
+
 class ScoreFormulaInfoOut(BaseModel):
     """選股分數的公式與白話說明，給前端直接顯示——公式定義只有後端一份，
     前端不自己抄，改公式時不會有兩邊講不一樣的情況。"""

@@ -45,6 +45,9 @@ export function Layout() {
           <NavLink to="/tutorial" className={({ isActive }) => (isActive ? "active" : "")}>
             股市教學
           </NavLink>
+          <NavLink to="/model-tutorial" className={({ isActive }) => (isActive ? "active" : "")}>
+            模型教學
+          </NavLink>
           {isAdmin && (
             <>
               <NavLink to="/admin" end className={({ isActive }) => (isActive ? "active" : "")}>

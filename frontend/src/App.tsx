@@ -6,6 +6,7 @@ import AdminPage from "./pages/AdminPage";
 import LoginPage from "./pages/LoginPage";
 import ModelDetailPage from "./pages/ModelDetailPage";
 import ModelsPage from "./pages/ModelsPage";
+import ModelTutorialPage from "./pages/ModelTutorialPage";
 import TutorialPage from "./pages/TutorialPage";
 
 // 這個系統轉型成公開的 AI 預測模型儀表板：一般使用者不再註冊/登入，
@@ -23,6 +24,7 @@ export default function App() {
             <Route path="/admin" element={<AdminPage />} />
             <Route path="/admin/models" element={<AdminModelsPage />} />
             <Route path="/tutorial" element={<TutorialPage />} />
+            <Route path="/model-tutorial" element={<ModelTutorialPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

@@ -2216,3 +2216,20 @@ tbody tr:hover {
     font-size: 12px;
   }
 }
+
+/* 模型教學：模型特性標籤（需要 GPU、吃序列…） */
+.model-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 4px;
+}
+
+.model-badge {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--muted);
+}
