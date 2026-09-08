@@ -4,7 +4,15 @@ import { api } from "../api";
 import { ConditionEditor } from "../components/ConditionEditor";
 import { ScoreFormulaExplainer } from "../components/ScoreFormulaExplainer";
 import { useAuth } from "../auth/AuthContext";
-import type { Activation, Condition, ModelSummary, ModelTrainRequest, ModelType, TrainDefaults } from "../types";
+import type {
+  Activation,
+  Condition,
+  ModelSummary,
+  ModelTrainRequest,
+  ModelType,
+  ModelTypeOption,
+  TrainDefaults,
+} from "../types";
 
 
 const STATUS_LABEL: Record<ModelSummary["status"], string> = {
@@ -26,6 +34,13 @@ function formatDuration(seconds: number | null): string {
   if (seconds == null) return "-";
   if (seconds < 60) return `${seconds.toFixed(1)} 秒`;
   return `${Math.floor(seconds / 60)} 分 ${Math.round(seconds % 60)} 秒`;
+}
+
+/** 模型名稱本身只寫演算法名稱，「需要 GPU」「吃序列」這類特性由旗標推導出來，
+ * 不寫死在名稱字串裡——不然旗標改了名稱卻沒改，下拉選單就會騙人。 */
+function typeHints(option: ModelTypeOption): string {
+  const hints = [option.is_neural && "需要 GPU", option.is_sequence && "吃連續 N 天序列"].filter(Boolean);
+  return hints.length > 0 ? `　— ${hints.join("、")}` : "";
 }
 
 export default function AdminModelsPage() {
@@ -217,6 +232,7 @@ export default function AdminModelsPage() {
                 {defaults.model_types.map((t) => (
                   <option key={t.key} value={t.key}>
                     {t.label}
+                    {typeHints(t)}
                   </option>
                 ))}
               </select>

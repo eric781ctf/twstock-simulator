@@ -24,28 +24,30 @@ interface Family {
   types: ModelType[];
 }
 
+// 名稱一律「英文（中文）」，跟後端的模型名稱一致——這些都是英文為通用名稱的
+// 演算法類別，中文譯名只是輔助辨識
 const FAMILIES: Family[] = [
   {
     key: "tree",
-    label: "樹模型集成",
+    label: "Tree Ensembles（樹模型集成）",
     summary: "很多棵決策樹投票／相加。表格式資料上長年的實務首選。",
     types: ["xgboost", "lightgbm", "random_forest"],
   },
   {
     key: "linear",
-    label: "線性模型",
+    label: "Linear Models（線性模型）",
     summary: "把每個特徵乘上一個係數再加起來。最單純、也最容易解釋。",
     types: ["logistic_regression"],
   },
   {
     key: "feedforward",
-    label: "前饋神經網路",
+    label: "Feedforward Neural Network（前饋神經網路）",
     summary: "多層非線性轉換，能學到特徵之間的交互作用。需要 GPU。",
     types: ["mlp"],
   },
   {
     key: "recurrent",
-    label: "循環神經網路",
+    label: "Recurrent Neural Network（循環神經網路）",
     summary: "吃「一段連續期間」而不是「某一天」，由網路自己看時間上的變化。需要 GPU。",
     types: ["gru", "lstm"],
   },
@@ -245,7 +247,7 @@ export default function ModelTutorialPage() {
     if (rest.length > 0) {
       known.push({
         key: "other",
-        label: "其他",
+        label: "Other（其他）",
         summary: "後端新增、但這一頁還沒補上分類的模型類型。",
         types: [],
         options: rest,
