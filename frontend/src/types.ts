@@ -168,6 +168,16 @@ export interface ModelTypeOption {
   label: string;
 }
 
+export interface ScoreFormulaInfo {
+  key: string;
+  name: string;
+  formula: string;
+  definition: string;
+  summary: string;
+  reasons: string[];
+  limitation: string;
+}
+
 export interface TrainDefaults {
   latest_data_date: string | null;
   train_start: string;
@@ -179,6 +189,7 @@ export interface TrainDefaults {
   default_features: string[];
   features: FeatureOption[];
   model_types: ModelTypeOption[];
+  score_formula: ScoreFormulaInfo;
 }
 
 export interface ModelTrainRequest {
@@ -187,7 +198,6 @@ export interface ModelTrainRequest {
   feature_config: string[];
   n_days: number;
   threshold_percent: number;
-  score_formula: ScoreFormula;
   score_weights?: { return: number; probability: number } | null;
   min_hold_days?: number | null;
   max_hold_days?: number | null;
@@ -260,6 +270,7 @@ export interface ModelDetail {
   take_profit_percent: number | null;
   sell_conditions: Condition[];
   score_weights: { return: number; probability: number } | null;
+  score_formula_info: ScoreFormulaInfo;
   train_start: string;
   train_end: string;
   validation_start: string;

@@ -660,8 +660,17 @@ tbody tr:hover {
   border-color: var(--buy);
 }
 
+/* 特徵名稱比日K分布的「1-9」長得多，56px 的標籤欄裝不下會直接溢出被長條蓋住。
+   grid 欄寬要在 row 上改，對子元素設 min-width 沒有用。 */
+.feature-importance-chart .bar-chart-row {
+  grid-template-columns: 190px 1fr 52px;
+}
+
 .feature-importance-chart .bar-chart-label {
-  min-width: 150px;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .signed-bar-wrap {
@@ -685,6 +694,97 @@ tbody tr:hover {
 
 .bar-chart-fill.positive {
   background: var(--buy);
+}
+
+.formula-explainer {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  margin-bottom: 16px;
+  background: var(--input-bg);
+}
+
+.formula-explainer-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.formula-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.formula-summary {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.formula-box {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+  text-align: center;
+}
+
+.formula-main {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-bottom: 8px;
+}
+
+.formula-def {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+
+.formula-weights {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 10px;
+}
+
+.formula-subtitle {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+
+.formula-reasons ul {
+  margin: 0 0 14px;
+  padding-left: 18px;
+}
+
+.formula-reasons li {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.7;
+  margin-bottom: 6px;
+}
+
+/* 「沒解決什麼」要看得出來跟一般說明不同——這是限制，不是特色 */
+.formula-limitation {
+  border-left: 3px solid var(--buy);
+  padding-left: 12px;
+}
+
+.formula-limitation p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.7;
 }
 
 .feature-checkbox-grid {

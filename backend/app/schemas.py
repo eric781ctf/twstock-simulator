@@ -173,6 +173,19 @@ class ModelTypeOptionOut(BaseModel):
     label: str
 
 
+class ScoreFormulaInfoOut(BaseModel):
+    """選股分數的公式與白話說明，給前端直接顯示——公式定義只有後端一份，
+    前端不自己抄，改公式時不會有兩邊講不一樣的情況。"""
+
+    key: str
+    name: str
+    formula: str
+    definition: str
+    summary: str
+    reasons: list[str]
+    limitation: str
+
+
 class TrainDefaultsOut(BaseModel):
     """給訓練表單用的預設值與可選項目：建議的六個切分日期（依本地資料最新
     日期往回推）、可勾選的特徵、可選的模型類型。"""
@@ -187,6 +200,7 @@ class TrainDefaultsOut(BaseModel):
     default_features: list[str]
     features: list[FeatureOptionOut]
     model_types: list[ModelTypeOptionOut]
+    score_formula: ScoreFormulaInfoOut
 
 
 class ModelTrainRequest(BaseModel):
@@ -197,7 +211,7 @@ class ModelTrainRequest(BaseModel):
     feature_config: list[str] = Field(min_length=1)
     n_days: int = Field(gt=0, le=60)
     threshold_percent: float
-    score_formula: Literal["multiply", "zscore_weighted"] = "multiply"
+    # 公式固定用橫斷面標準化，只有權重可調
     score_weights: dict | None = None
 
     min_hold_days: int | None = Field(default=None, ge=0, le=250)
@@ -311,6 +325,7 @@ class ModelDetailOut(BaseModel):
     take_profit_percent: float | None
     sell_conditions: list[dict]
     score_weights: dict | None
+    score_formula_info: ScoreFormulaInfoOut
     train_start: date
     train_end: date
     validation_start: date

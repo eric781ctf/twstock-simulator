@@ -122,7 +122,7 @@ def run_daily_cycle(
         return exits, []
 
     predicted_returns, probabilities = predict_rows(bundle, candidates)
-    scores = compute_scores(predicted_returns, probabilities, model.score_formula, model.score_weights)
+    scores = compute_scores(predicted_returns, probabilities, model.score_weights)
 
     order = np.argsort(scores)[::-1][:open_slots]
     entries = [

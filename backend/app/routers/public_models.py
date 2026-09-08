@@ -20,10 +20,12 @@ from app.schemas import (
     ModelHoldingOut,
     ModelPredictionPointOut,
     ModelSummaryOut,
+    ScoreFormulaInfoOut,
     ScoringRunOut,
 )
 from app.services.ml.exit_rules import net_return_percent
 from app.services.ml.features import FEATURE_LABELS
+from app.services.ml.train import SCORE_FORMULA_INFO
 from app.services.ml.performance import latest_close_prices, summarize_holdings
 
 logger = logging.getLogger(__name__)
@@ -208,6 +210,7 @@ def get_public_model(model_id: int, db: Session = Depends(get_db)):
         take_profit_percent=model.take_profit_percent,
         sell_conditions=list(model.sell_conditions),
         score_weights=model.score_weights,
+        score_formula_info=ScoreFormulaInfoOut(**SCORE_FORMULA_INFO),
         train_start=model.train_start,
         train_end=model.train_end,
         validation_start=model.validation_start,
