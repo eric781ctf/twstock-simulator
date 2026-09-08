@@ -6,6 +6,7 @@
 """
 
 import logging
+import shutil
 from pathlib import Path
 
 import joblib
@@ -73,6 +74,24 @@ def save_bundle(
     )
     logger.info("save_bundle: 模型 %d 已存到 %s", model_id, target)
     return str(target)
+
+
+def remove_bundle(model_id: int) -> bool:
+    """刪掉模型檔案資料夾。回傳有沒有真的刪到東西。
+
+    訓練失敗的版本通常根本沒走到存檔那一步，所以「沒有資料夾」是正常情況，
+    不是錯誤。刪不掉（權限之類）也只記錄下來就好——資料庫那筆已經刪了，
+    為了一個孤兒資料夾把整個刪除操作標成失敗並不划算。
+    """
+    target = artifact_dir(model_id)
+    if not target.exists():
+        return False
+    try:
+        shutil.rmtree(target)
+        return True
+    except OSError:
+        logger.warning("remove_bundle: 模型 %d 的檔案 %s 刪不掉", model_id, target, exc_info=True)
+        return False
 
 
 def load_bundle(model_artifact_path: str) -> ModelBundle:

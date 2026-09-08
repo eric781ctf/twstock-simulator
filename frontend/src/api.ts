@@ -15,6 +15,7 @@ import type {
   MarketSession,
   ModelDetail,
   ModelCatalog,
+  ModelDeleteResult,
   ModelSummary,
   ModelTrainRequest,
   Order,
@@ -170,4 +171,5 @@ export const api = {
     request<ModelSummary>("/admin/models", { method: "POST", body: JSON.stringify(payload) }),
   archiveModel: (id: number) => request<ModelSummary>(`/admin/models/${id}/archive`, { method: "POST" }),
   unarchiveModel: (id: number) => request<ModelSummary>(`/admin/models/${id}/unarchive`, { method: "POST" }),
+  deleteModel: (id: number) => request<ModelDeleteResult>(`/admin/models/${id}`, { method: "DELETE" }),
 };

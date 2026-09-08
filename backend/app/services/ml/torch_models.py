@@ -252,6 +252,7 @@ class TorchDualTaskModel:
         self.best_epoch: int = 0
         self.early_stopped: bool = False
         self.patience: int = 0
+        self.batch_size: int = 0
 
     def as_regressor(self):
         return _RegressorView(self)
@@ -437,6 +438,7 @@ def train_torch_dual_task(
     model.epochs_run = len(model.loss_curve)
     model.configured_epochs = epochs
     model.patience = patience
+    model.batch_size = batch_size
 
     # 早停開著時一律還原最佳權重。不還原的話，即使提早停了，帶走的仍然是
     # 「已經開始變差的那幾輪」的權重——那正是早停要避免的事。

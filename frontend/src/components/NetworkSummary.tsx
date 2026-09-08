@@ -51,6 +51,12 @@ export function NetworkSummary({ info }: { info: NetworkInfo }) {
             </span>
           </div>
         ) : null}
+        {info.batch_size ? (
+          <div className="stat">
+            <span className="label">Batch size</span>
+            <span className="value">{info.batch_size}</span>
+          </div>
+        ) : null}
         <div className="stat">
           <span className="label">總參數量</span>
           <span className="value">{info.total_params.toLocaleString()}</span>

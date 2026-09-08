@@ -12,9 +12,10 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import PredictionModel, User
+from app.models import ModelHolding, ModelPrediction, ModelScoringRun, PredictionModel, User
 from app.schemas import (
     FeatureOptionOut,
+    ModelDeleteResultOut,
     ModelSummaryOut,
     ModelTrainRequest,
     ModelTypeOptionOut,
@@ -22,6 +23,7 @@ from app.schemas import (
     TrainDefaultsOut,
 )
 from app.services.auth import require_admin
+from app.services.ml import artifacts
 from app.services.ml.features import DEFAULT_FEATURES, FEATURE_KEYS, FEATURE_LABELS
 from app.services.ml.inference import latest_bar_date
 from app.services.ml.performance import summarize_holdings
@@ -169,3 +171,50 @@ def unarchive_model(model_id: int, db: Session = Depends(get_db), _: User = Depe
     db.refresh(model)
     stats = summarize_holdings(db, [model.id])
     return _to_summary(model, stats.get(model.id, {}))
+
+
+@router.delete("/{model_id}", response_model=ModelDeleteResultOut)
+def delete_model(model_id: int, db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    """整個刪掉這個版本：預測、持有、每日執行紀錄與模型檔案一起清乾淨。
+
+    跟封存是兩件事。封存留著歷史只是停止繼續動作；刪除是真的把資料移除、
+    無法還原。主要用在訓練失敗（例如 GPU 記憶體不足）那種只會卡在列表上、
+    留著也沒有任何資訊價值的版本。
+
+    訓練中的不給刪：那筆資料正被背景 process 寫著，中途抽掉只會換來一個更難
+    查的錯誤。等它自己跑完或失敗再刪。
+    """
+    model = _get_model(db, model_id)
+    if model.status == "training":
+        raise HTTPException(status_code=409, detail="這個模型正在訓練中，請等它結束後再刪除")
+
+    predictions = db.query(ModelPrediction).filter(ModelPrediction.model_id == model_id).delete()
+    holdings = db.query(ModelHolding).filter(ModelHolding.model_id == model_id).delete()
+    runs = db.query(ModelScoringRun).filter(ModelScoringRun.model_id == model_id).delete()
+
+    label = f"{model.model_family} v{model.version}"
+    db.delete(model)
+    db.commit()
+
+    # 資料庫刪掉了才處理檔案。反過來的話，檔案刪了但交易回滾，就會留下一個
+    # 指向不存在檔案的模型，那比留著孤兒檔案糟得多。
+    removed_artifact = artifacts.remove_bundle(model_id)
+
+    logger.info(
+        "刪除模型 %d(%s)：預測 %d 筆、持有 %d 筆、執行紀錄 %d 筆，模型檔案 %s",
+        model_id,
+        label,
+        predictions,
+        holdings,
+        runs,
+        "已移除" if removed_artifact else "無",
+    )
+    return ModelDeleteResultOut(
+        deleted=True,
+        model_id=model_id,
+        label=label,
+        deleted_predictions=predictions,
+        deleted_holdings=holdings,
+        deleted_scoring_runs=runs,
+        removed_artifact=removed_artifact,
+    )

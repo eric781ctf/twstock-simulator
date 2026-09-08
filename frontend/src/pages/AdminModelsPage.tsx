@@ -72,6 +72,7 @@ export default function AdminModelsPage() {
   const [epochs, setEpochs] = useState("60");
   const [sequenceLength, setSequenceLength] = useState("20");
   const [patience, setPatience] = useState("10");
+  const [batchSize, setBatchSize] = useState("512");
   const [dates, setDates] = useState({
     train_start: "",
     train_end: "",
@@ -159,6 +160,7 @@ export default function AdminModelsPage() {
             epochs: Number(epochs),
             sequence_length: Number(sequenceLength),
             patience: Number(patience),
+            batch_size: Number(batchSize),
           }
         : null,
       min_hold_days: optionalNumber(minHold),
@@ -191,6 +193,30 @@ export default function AdminModelsPage() {
       await refreshModels();
     } catch (err) {
       alert(err instanceof Error ? err.message : "操作失敗");
+    }
+  }
+
+  async function handleDelete(model: ModelSummary) {
+    const name = `${model.model_family} v${model.version}`;
+    // 確認訊息要具體講出會失去什麼。訓練失敗的版本本來就沒有資料，
+    // 但已完成的版本可能帶著一整段持有紀錄，那是刪掉就回不來的東西。
+    const holdings = model.open_holding_count + model.closed_holding_count;
+    const detail =
+      model.status === "completed"
+        ? `這會一併刪掉它的回測預測、${holdings} 筆持有紀錄、每日執行紀錄與模型檔案，且無法還原。\n\n` +
+          "如果只是想讓它停止每日選股、但保留歷史，請改用「封存」。"
+        : "這個版本沒有訓練成功，刪掉不會影響任何歷史資料。";
+
+    if (!window.confirm(`確定要刪除「${name}」嗎？\n\n${detail}`)) return;
+    try {
+      const result = await api.deleteModel(model.id);
+      setNotice(
+        `已刪除 ${result.label}：預測 ${result.deleted_predictions} 筆、持有 ${result.deleted_holdings} 筆、` +
+          `執行紀錄 ${result.deleted_scoring_runs} 筆${result.removed_artifact ? "，模型檔案已移除" : ""}`
+      );
+      await refreshModels();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "刪除失敗");
     }
   }
 
@@ -323,7 +349,22 @@ export default function AdminModelsPage() {
                   早停耐心值（0 = 關閉）
                   <input type="number" min={0} max={200} value={patience} onChange={(e) => setPatience(e.target.value)} />
                 </label>
+                <label>
+                  Batch size
+                  <input
+                    type="number"
+                    min={8}
+                    max={16384}
+                    value={batchSize}
+                    onChange={(e) => setBatchSize(e.target.value)}
+                  />
+                </label>
               </div>
+              <p className="order-hint">
+                Batch size 是一次送進網路幾筆。<b>顯示記憶體不足（CUDA out of memory）時就調小它</b>，
+                代價是訓練變慢；記憶體還很寬裕時調大則會快一些。序列模型每一筆要展開成
+                「序列長度 × 特徵數」，同樣的 batch size 會比一般網路吃掉更多記憶體。
+              </p>
               <p className="order-hint">
                 早停：連續這麼多輪的驗證 loss 沒有創新低就停止訓練，並且還原成
                 <b>驗證 loss 最低的那一輪</b>的權重。關掉的話會跑滿設定的輪數，存下來的是最後一輪——
@@ -485,11 +526,19 @@ export default function AdminModelsPage() {
                     </td>
                     <td>{m.trained_at ? new Date(m.trained_at).toLocaleString("zh-TW", { hour12: false }) : "-"}</td>
                     <td>
-                      {m.status === "completed" && (
-                        <span className="cancel-link" onClick={() => handleToggleArchive(m)}>
-                          {m.is_archived ? "取消封存" : "封存"}
-                        </span>
-                      )}
+                      <div className="model-row-actions">
+                        {m.status === "completed" && (
+                          <span className="cancel-link" onClick={() => handleToggleArchive(m)}>
+                            {m.is_archived ? "取消封存" : "封存"}
+                          </span>
+                        )}
+                        {/* 訓練中的不給刪：那筆資料正被背景 process 寫著 */}
+                        {m.status !== "training" && (
+                          <span className="cancel-link danger-link" onClick={() => handleDelete(m)}>
+                            刪除
+                          </span>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}

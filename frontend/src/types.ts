@@ -194,6 +194,7 @@ export interface NetworkInfo {
   best_epoch: number | null;
   early_stopped: boolean;
   patience: number | null;
+  batch_size: number | null;
 }
 
 export interface NetworkConfigInput {
@@ -204,6 +205,7 @@ export interface NetworkConfigInput {
   epochs: number;
   sequence_length: number;
   patience: number;
+  batch_size: number;
 }
 export type ScoreFormula = "multiply" | "zscore_weighted";
 export type ModelStatus = "queued" | "training" | "completed" | "failed";
@@ -537,4 +539,14 @@ export interface ModelCatalog {
   top_n: number;
   commission_rate: number;
   tax_rate: number;
+}
+
+export interface ModelDeleteResult {
+  deleted: boolean;
+  model_id: number;
+  label: string;
+  deleted_predictions: number;
+  deleted_holdings: number;
+  deleted_scoring_runs: number;
+  removed_artifact: boolean;
 }

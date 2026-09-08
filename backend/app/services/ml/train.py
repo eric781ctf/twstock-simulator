@@ -277,6 +277,7 @@ def train_dual_task(
             epochs=int(config.get("epochs", 60)),
             model_kind=model_type,
             patience=int(config.get("patience", 10)),
+            batch_size=int(config.get("batch_size", 512)),
         )
         regressor = torch_model.as_regressor()
         classifier = torch_model.as_classifier()
@@ -295,6 +296,7 @@ def train_dual_task(
             "best_epoch": torch_model.best_epoch,
             "early_stopped": torch_model.early_stopped,
             "patience": torch_model.patience,
+            "batch_size": torch_model.batch_size,
         }
         importance = torch_model.input_weight_importance(feature_keys)
         regression_importance = classification_importance = importance
