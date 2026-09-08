@@ -71,6 +71,7 @@ export default function AdminModelsPage() {
   const [learningRate, setLearningRate] = useState("0.001");
   const [epochs, setEpochs] = useState("60");
   const [sequenceLength, setSequenceLength] = useState("20");
+  const [patience, setPatience] = useState("10");
   const [dates, setDates] = useState({
     train_start: "",
     train_end: "",
@@ -157,6 +158,7 @@ export default function AdminModelsPage() {
             learning_rate: Number(learningRate),
             epochs: Number(epochs),
             sequence_length: Number(sequenceLength),
+            patience: Number(patience),
           }
         : null,
       min_hold_days: optionalNumber(minHold),
@@ -317,7 +319,16 @@ export default function AdminModelsPage() {
                   訓練輪數 epochs
                   <input type="number" min={1} max={1000} value={epochs} onChange={(e) => setEpochs(e.target.value)} />
                 </label>
+                <label>
+                  早停耐心值（0 = 關閉）
+                  <input type="number" min={0} max={200} value={patience} onChange={(e) => setPatience(e.target.value)} />
+                </label>
               </div>
+              <p className="order-hint">
+                早停：連續這麼多輪的驗證 loss 沒有創新低就停止訓練，並且還原成
+                <b>驗證 loss 最低的那一輪</b>的權重。關掉的話會跑滿設定的輪數，存下來的是最後一輪——
+                如果中間就開始過擬合，那組權重會比最好的那組差。
+              </p>
               {parsedHiddenSizes.length > 0 && (
                 <p className="order-hint network-preview">
                   結構預覽：

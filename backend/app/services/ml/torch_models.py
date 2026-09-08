@@ -29,6 +29,13 @@ DEFAULT_BATCH_SIZE = 512
 # 中間結果，但仍然要有上限——評估時整個訓練集會一次傳進來。
 PREDICT_BATCH = 4096
 
+# 早停：連續這麼多個 epoch 驗證 loss 沒創新低就停。預設開著——實測 GRU 的驗證
+# loss 在第 2 個 epoch 就觸底，後面 28 輪都在過擬合，不停的話存下來的是那 28 輪
+# 之後的權重。設 0 可以關閉。
+DEFAULT_PATIENCE = 10
+# 小於這個幅度的下降不算「創新低」，避免在雜訊上一直重置耐心值
+MIN_IMPROVEMENT = 1e-4
+
 ACTIVATIONS = ["relu", "tanh", "gelu"]
 
 
@@ -241,6 +248,10 @@ class TorchDualTaskModel:
         self.loss_curve: list[dict] = []
         self.device_name: str = ""
         self.epochs_run: int = 0
+        self.configured_epochs: int = 0
+        self.best_epoch: int = 0
+        self.early_stopped: bool = False
+        self.patience: int = 0
 
     def as_regressor(self):
         return _RegressorView(self)
@@ -322,8 +333,14 @@ def train_torch_dual_task(
     epochs: int,
     batch_size: int = DEFAULT_BATCH_SIZE,
     model_kind: str = "mlp",
+    patience: int = DEFAULT_PATIENCE,
 ) -> TorchDualTaskModel:
-    """x_train 是 (N, 特徵數)（MLP）或 (N, T, 特徵數)（GRU/LSTM）。"""
+    """x_train 是 (N, 特徵數)（MLP）或 (N, T, 特徵數)（GRU/LSTM）。
+
+    patience 是早停的耐心值：連續這麼多個 epoch 的驗證 loss 沒有創新低就停止，
+    並且**還原到驗證 loss 最低的那一輪的權重**。設 0 關閉，跑滿所有 epoch 並
+    採用最後一輪的權重。
+    """
     from torch.utils.data import DataLoader, TensorDataset
 
     device = resolve_device()
@@ -352,6 +369,10 @@ def train_torch_dual_task(
         network, n_features, hidden_sizes, activation, dropout, model_kind, sequence_length
     )
     model.device_name = describe_device()
+
+    best_loss = float("inf")
+    best_state: dict | None = None
+    epochs_since_best = 0
 
     def validation_loss() -> float:
         """整個驗證集的平均 loss，用樣本數加權（最後一批通常比較小）。"""
@@ -391,22 +412,49 @@ def train_torch_dual_task(
             epoch_total += float(loss.item())
             batches += 1
 
+        current_validation = validation_loss()
         model.loss_curve.append(
             {
                 "epoch": epoch,
                 "train_loss": epoch_total / max(batches, 1),
-                "validation_loss": validation_loss(),
+                "validation_loss": current_validation,
             }
         )
 
-    model.epochs_run = epochs
+        if current_validation < best_loss - MIN_IMPROVEMENT:
+            best_loss = current_validation
+            model.best_epoch = epoch
+            # 存到 CPU 並複製一份：state_dict 給的是還在 GPU 上、之後會被就地
+            # 更新的同一批 tensor，不複製的話「最佳權重」會跟著後面的訓練變動
+            best_state = {k: v.detach().cpu().clone() for k, v in network.state_dict().items()}
+            epochs_since_best = 0
+        else:
+            epochs_since_best += 1
+            if patience > 0 and epochs_since_best >= patience:
+                model.early_stopped = True
+                break
+
+    model.epochs_run = len(model.loss_curve)
+    model.configured_epochs = epochs
+    model.patience = patience
+
+    # 早停開著時一律還原最佳權重。不還原的話，即使提早停了，帶走的仍然是
+    # 「已經開始變差的那幾輪」的權重——那正是早停要避免的事。
+    if patience > 0 and best_state is not None:
+        network.load_state_dict(best_state)
+        network.to(device)
+
     logger.info(
-        "train_torch_dual_task(%s): %s，%d 層、%d 個參數、%d epochs，最終驗證 loss %.4f",
+        "train_torch_dual_task(%s): %s，%d 層、%d 個參數，跑了 %d/%d epochs"
+        "（最佳第 %d 輪，驗證 loss %.4f%s）",
         model_kind,
         model.device_name,
         len(hidden_sizes),
         model.total_params(),
+        model.epochs_run,
         epochs,
-        model.loss_curve[-1]["validation_loss"] if model.loss_curve else float("nan"),
+        model.best_epoch,
+        best_loss,
+        "，已還原該輪權重" if patience > 0 and best_state is not None else "，未啟用早停",
     )
     return model

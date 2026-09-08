@@ -204,6 +204,11 @@ class NetworkInfoOut(BaseModel):
     # 只有 GRU/LSTM 有：一個樣本往回看幾個交易日
     sequence_length: int | None = None
     kind: str | None = None
+    # 早停：實際跑到第幾輪、哪一輪的驗證 loss 最低（存下來的就是那一輪的權重）
+    configured_epochs: int | None = None
+    best_epoch: int | None = None
+    early_stopped: bool = False
+    patience: int | None = None
 
 
 class NetworkConfigIn(BaseModel):
@@ -216,6 +221,8 @@ class NetworkConfigIn(BaseModel):
     epochs: int = Field(default=60, ge=1, le=1000)
     # GRU/LSTM 專用；MLP 會忽略這個值
     sequence_length: int = Field(default=20, ge=5, le=120)
+    # 早停耐心值。0 = 關閉，跑滿 epochs 並採用最後一輪的權重
+    patience: int = Field(default=10, ge=0, le=200)
 
     @model_validator(mode="after")
     def _check_sizes(self):

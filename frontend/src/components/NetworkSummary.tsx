@@ -36,8 +36,21 @@ export function NetworkSummary({ info }: { info: NetworkInfo }) {
         </div>
         <div className="stat">
           <span className="label">訓練輪數</span>
-          <span className="value">{info.epochs}</span>
+          <span className="value">
+            {info.epochs}
+            {info.configured_epochs && info.configured_epochs !== info.epochs
+              ? ` / ${info.configured_epochs}（早停）`
+              : ""}
+          </span>
         </div>
+        {info.best_epoch ? (
+          <div className="stat">
+            <span className="label">採用的權重</span>
+            <span className="value">
+              {info.patience ? `第 ${info.best_epoch} 輪` : `第 ${info.epochs} 輪（最後一輪）`}
+            </span>
+          </div>
+        ) : null}
         <div className="stat">
           <span className="label">總參數量</span>
           <span className="value">{info.total_params.toLocaleString()}</span>
@@ -79,8 +92,11 @@ export function NetworkSummary({ info }: { info: NetworkInfo }) {
       <p className="order-hint">
         兩條線分開看：訓練 loss 一直降但驗證 loss 開始往上，就是過擬合的訊號——
         代表網路開始在背訓練資料，而不是學到能套用到新資料的規律。
+        {info.patience && info.best_epoch
+          ? `這個模型開了早停，實際存下來的是驗證 loss 最低的第 ${info.best_epoch} 輪（圖上的虛線），不是最後一輪。`
+          : "這個模型沒開早停，存下來的是最後一輪的權重。"}
       </p>
-      <LossCurve points={info.loss_curve} />
+      <LossCurve points={info.loss_curve} bestEpoch={info.patience ? info.best_epoch : null} />
     </>
   );
 }
@@ -89,7 +105,7 @@ const PADDING = { top: 16, right: 16, bottom: 34, left: 56 };
 const VIEW_WIDTH = 720;
 const HEIGHT = 260;
 
-function LossCurve({ points }: { points: NetworkInfo["loss_curve"] }) {
+function LossCurve({ points, bestEpoch }: { points: NetworkInfo["loss_curve"]; bestEpoch: number | null }) {
   if (points.length === 0) return <div className="empty-hint">沒有 loss 紀錄</div>;
 
   const all = points.flatMap((p) => [p.train_loss, p.validation_loss]).filter((v) => Number.isFinite(v));
@@ -127,6 +143,22 @@ function LossCurve({ points }: { points: NetworkInfo["loss_curve"] }) {
             </text>
           </g>
         ))}
+        {bestEpoch != null && (
+          <g>
+            <line
+              x1={toX(bestEpoch)}
+              x2={toX(bestEpoch)}
+              y1={PADDING.top}
+              y2={PADDING.top + plotHeight}
+              stroke="#9b8cff"
+              strokeWidth="1.5"
+              strokeDasharray="4 4"
+            />
+            <text x={toX(bestEpoch) + 5} y={PADDING.top + 12} fontSize="11" fill="#9b8cff">
+              採用第 {bestEpoch} 輪
+            </text>
+          </g>
+        )}
         <path d={line("train_loss")} fill="none" stroke="#4fd8ff" strokeWidth="2" />
         <path d={line("validation_loss")} fill="none" stroke="#ff4f7e" strokeWidth="2" />
         <text x={PADDING.left + plotWidth / 2} y={HEIGHT - 6} textAnchor="middle" fontSize="11" fill="#7688a8">
@@ -142,6 +174,12 @@ function LossCurve({ points }: { points: NetworkInfo["loss_curve"] }) {
           <i style={{ background: "#ff4f7e" }} />
           驗證 loss
         </span>
+        {bestEpoch != null && (
+          <span>
+            <i style={{ background: "#9b8cff" }} />
+            實際採用的那一輪
+          </span>
+        )}
       </div>
     </div>
   );

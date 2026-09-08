@@ -199,6 +199,12 @@ def _loss_curve_warnings(network_info: dict | None) -> list[str]:
 
     這是神經網路才有的訊號，而且比單看 AUC/Rank IC 差距更明確：驗證 loss 觸底
     之後回頭往上，就代表從那個 epoch 之後網路是在背訓練資料，不是在學規律。
+
+    要講的事情會因為有沒有開早停而不同：
+    - 沒開早停：存下來的是**最後一輪**的權重，也就是已經變差的那一組，這是
+      真正的問題，要明講。
+    - 有開早停：權重已經還原成最好的那一輪，過擬合本身被處理掉了。但如果非常
+      早就觸底，代表模型相對於資料量太大，那仍然值得提醒。
     """
     if not network_info:
         return []
@@ -210,15 +216,26 @@ def _loss_curve_warnings(network_info: dict | None) -> list[str]:
     best_index = int(np.argmin(validation_losses))
     best = validation_losses[best_index]
     final = validation_losses[-1]
-    if best <= 0 or final <= best * 1.05:
-        return []
-
     best_epoch = curve[best_index]["epoch"]
-    return [
-        f"驗證 loss 在第 {best_epoch} 個 epoch 觸底（{best:.2f}），"
-        f"之後一路回升到 {final:.2f}，代表後面那些 epoch 都在過擬合。"
-        f"建議把訓練輪數降到 {best_epoch} 附近，或提高 dropout。"
-    ]
+    restored = bool(network_info.get("patience")) and network_info.get("best_epoch")
+
+    if not restored:
+        if best <= 0 or final <= best * 1.05:
+            return []
+        return [
+            f"驗證 loss 在第 {best_epoch} 個 epoch 觸底（{best:.2f}），之後一路回升到 {final:.2f}。"
+            f"這個模型沒有啟用早停，所以存下來的是最後一輪的權重，也就是已經過擬合的那一組——"
+            f"重新訓練並開啟早停，或把訓練輪數降到 {best_epoch} 附近，都會得到更好的模型。"
+        ]
+
+    # 早停已經把最好的權重救回來了，只在「太早觸底」時提醒容量問題
+    if best_epoch <= max(3, len(curve) // 10):
+        return [
+            f"驗證 loss 在第 {best_epoch} 個 epoch 就觸底，之後就沒再進步過"
+            f"（早停已自動還原第 {best_epoch} 輪的權重，所以這個模型用的是最好的那一組）。"
+            "這麼早觸底通常代表模型相對於資料量太大，可以試著縮小網路、提高 dropout，或增加訓練資料。"
+        ]
+    return []
 
 
 def train_dual_task(
@@ -259,6 +276,7 @@ def train_dual_task(
             learning_rate=float(config.get("learning_rate", 0.001)),
             epochs=int(config.get("epochs", 60)),
             model_kind=model_type,
+            patience=int(config.get("patience", 10)),
         )
         regressor = torch_model.as_regressor()
         classifier = torch_model.as_classifier()
@@ -273,6 +291,10 @@ def train_dual_task(
             "dropout": torch_model.dropout,
             "sequence_length": torch_model.sequence_length,
             "kind": torch_model.model_kind,
+            "configured_epochs": torch_model.configured_epochs,
+            "best_epoch": torch_model.best_epoch,
+            "early_stopped": torch_model.early_stopped,
+            "patience": torch_model.patience,
         }
         importance = torch_model.input_weight_importance(feature_keys)
         regression_importance = classification_importance = importance
