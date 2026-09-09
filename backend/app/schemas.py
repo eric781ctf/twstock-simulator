@@ -310,6 +310,7 @@ class ModelTrainRequest(BaseModel):
     feature_config: list[str] = Field(min_length=1)
     n_days: int = Field(gt=0, le=60)
     threshold_percent: float
+    label_mode: Literal["absolute", "excess"] = "excess"
     # 公式固定用橫斷面標準化，只有權重可調
     score_weights: dict | None = None
     network_config: NetworkConfigIn | None = None
@@ -350,6 +351,8 @@ class ModelSummaryOut(BaseModel):
     is_archived: bool
     n_days: int
     threshold_percent: float
+    label_mode: str = "absolute"
+    label_mode_label: str = ""
     score_formula: str
     training_duration_seconds: float | None
     # 訓練途中才有值（階段、第幾個 epoch、當下的 loss），完成或失敗後回到 None

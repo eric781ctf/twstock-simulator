@@ -274,6 +274,9 @@ class PredictionModel(Base):
     # 預測目標：未來 n_days 天的報酬率（迴歸），以及是否超過 threshold_percent（分類）
     n_days: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
     threshold_percent: Mapped[float] = mapped_column(Float, nullable=False, default=3.0)
+    # 預測的是絕對報酬還是超額報酬（減掉大盤）。舊模型沒有這個欄位，
+    # 取不到就是 absolute——它們當初訓練時本來就是那樣算的
+    label_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="absolute")
 
     # 選股分數一律用橫斷面標準化加權（見 services/ml/train.py 的 SCORE_FORMULA_INFO）
     score_formula: Mapped[str] = mapped_column(String(20), nullable=False, default="zscore_weighted")

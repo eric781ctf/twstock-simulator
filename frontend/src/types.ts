@@ -209,6 +209,7 @@ export interface NetworkConfigInput {
   patience: number;
   batch_size: number;
 }
+export type LabelMode = "absolute" | "excess";
 export type ScoreFormula = "multiply" | "zscore_weighted";
 export type ModelStatus = "queued" | "training" | "completed" | "failed";
 
@@ -254,6 +255,7 @@ export interface ModelTrainRequest {
   feature_config: string[];
   n_days: number;
   threshold_percent: number;
+  label_mode: LabelMode;
   score_weights?: { return: number; probability: number } | null;
   network_config?: NetworkConfigInput | null;
   min_hold_days?: number | null;
@@ -357,6 +359,8 @@ export interface ModelSummary {
   is_archived: boolean;
   n_days: number;
   threshold_percent: number;
+  label_mode: string;
+  label_mode_label: string;
   score_formula: ScoreFormula;
   training_duration_seconds: number | null;
   /** 訓練途中才有值，完成或失敗後回到 null */

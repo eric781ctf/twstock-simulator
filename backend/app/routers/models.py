@@ -24,6 +24,7 @@ from app.schemas import (
 )
 from app.services.auth import require_admin
 from app.services.ml import artifacts
+from app.services.ml.dataset import LABEL_MODE_LABELS
 from app.services.ml.features import DEFAULT_FEATURES, FEATURE_KEYS, FEATURE_LABELS
 from app.services.ml.inference import latest_bar_date
 from app.services.ml.performance import summarize_holdings
@@ -74,6 +75,8 @@ def _to_summary(model: PredictionModel, stats: dict) -> ModelSummaryOut:
         is_archived=model.is_archived,
         n_days=model.n_days,
         threshold_percent=model.threshold_percent,
+        label_mode=model.label_mode,
+        label_mode_label=LABEL_MODE_LABELS.get(model.label_mode, model.label_mode),
         score_formula=model.score_formula,
         training_duration_seconds=model.training_duration_seconds,
         training_progress=model.training_progress,
@@ -120,6 +123,7 @@ async def create_model(
         feature_config=payload.feature_config,
         n_days=payload.n_days,
         threshold_percent=payload.threshold_percent,
+        label_mode=payload.label_mode,
         score_formula=SCORE_FORMULA_KEY,
         score_weights=payload.score_weights,
         network_config=payload.network_config.model_dump() if payload.network_config else None,

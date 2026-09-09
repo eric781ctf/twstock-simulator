@@ -5,6 +5,7 @@ import { ConditionEditor } from "../components/ConditionEditor";
 import { useAuth } from "../auth/AuthContext";
 import type {
   Activation,
+  LabelMode,
   Condition,
   ModelSummary,
   ModelTrainRequest,
@@ -78,6 +79,7 @@ export default function AdminModelsPage() {
   const [features, setFeatures] = useState<string[]>([]);
   const [nDays, setNDays] = useState("5");
   const [threshold, setThreshold] = useState("3");
+  const [labelMode, setLabelMode] = useState<LabelMode>("excess");
   const [returnWeight, setReturnWeight] = useState("0.5");
   const [probabilityWeight, setProbabilityWeight] = useState("0.5");
   const [minHold, setMinHold] = useState("2");
@@ -172,6 +174,7 @@ export default function AdminModelsPage() {
       feature_config: features,
       n_days: Number(nDays),
       threshold_percent: Number(threshold),
+      label_mode: labelMode,
       score_weights: { return: Number(returnWeight), probability: Number(probabilityWeight) },
       network_config: isNeural
         ? {
@@ -290,6 +293,13 @@ export default function AdminModelsPage() {
               <input type="number" min={1} max={60} value={nDays} onChange={(e) => setNDays(e.target.value)} />
             </label>
             <label>
+              預測目標
+              <select value={labelMode} onChange={(e) => setLabelMode(e.target.value as LabelMode)}>
+                <option value="excess">超額報酬（減掉大盤）</option>
+                <option value="absolute">絕對報酬</option>
+              </select>
+            </label>
+            <label>
               報酬率門檻（%）
               <input type="number" step="0.1" value={threshold} onChange={(e) => setThreshold(e.target.value)} />
             </label>
@@ -405,6 +415,15 @@ export default function AdminModelsPage() {
               )}
             </>
           )}
+
+          <p className="order-hint">
+            <b>預測目標</b>決定模型要學什麼。「超額報酬」是個股報酬減掉同一段期間的大盤報酬——
+            大盤漲 3% 的日子幾乎每檔都達標、跌 3% 的日子幾乎每檔都不達標，用絕對報酬的話模型有
+            相當一部分容量會耗在猜大盤上。這個系統實際做的是「每天挑相對最強的前 10 名」，
+            超額報酬才對得上這件事。
+            　注意換成超額報酬之後，同樣的門檻代表的意思不一樣了（達標率會明顯下降），
+            兩種模式的數字不能直接互相比較。
+          </p>
 
           <h3 className="tutorial-heading">選股分數怎麼算</h3>
           {/* 權重就是上面那兩個欄位，這裡不重複整套公式說明，連到模型教學即可 */}

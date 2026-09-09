@@ -379,6 +379,9 @@ def build_market_series(bars_by_code: dict[str, list[DailyBar]]) -> dict[date, d
         ma20 = sum(levels[-20:]) / 20 if len(levels) >= 20 else None
 
         series[day] = {
+            # 合成指數的水位。特徵用不到（水位本身沒有跨時間可比性），
+            # 但算「未來 N 天的大盤報酬」需要它——那是 label 那邊的事
+            "market_level": level,
             "market_return_1d": market_return,
             "market_return_5d": change_over(5),
             "market_return_20d": change_over(20),
@@ -388,6 +391,11 @@ def build_market_series(bars_by_code: dict[str, list[DailyBar]]) -> dict[date, d
 
     logger.info("build_market_series: %d 個交易日的大盤狀態", len(series))
     return series
+
+
+def market_levels(series: dict[date, dict]) -> dict[date, float]:
+    """從大盤序列抽出「日期 → 指數水位」，給 label 算未來報酬用。"""
+    return {day: values["market_level"] for day, values in series.items()}
 
 
 def _relative_features(row: dict, market: dict | None) -> dict:
@@ -448,7 +456,7 @@ def build_feature_rows(
             row.update(compute_feature_row(bars, kd_series, index))
             row.update(valuation)
             market = market_series.get(bar.trade_date)
-            row.update(market or {key: None for key in MARKET_FEATURE_KEYS})
+            row.update({key: (market or {}).get(key) for key in MARKET_FEATURE_KEYS})
             # 相對強弱要在個股特徵算完之後才算得出來（它用到 change_percent）
             row.update(_relative_features(row, market))
             row.update(_chip_features(bars, index, chips))
