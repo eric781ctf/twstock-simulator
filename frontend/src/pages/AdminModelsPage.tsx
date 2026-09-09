@@ -305,7 +305,7 @@ export default function AdminModelsPage() {
               )}
               <div className="strategy-form-grid">
                 <label>
-                  每層神經元數（用逗號分隔）
+                  Hidden sizes
                   <input
                     placeholder="64, 32"
                     value={hiddenSizes}
@@ -314,7 +314,7 @@ export default function AdminModelsPage() {
                 </label>
                 {isSequence ? (
                   <label>
-                    序列長度（往回看幾個交易日）
+                    Sequence length
                     <input
                       type="number"
                       min={5}
@@ -325,7 +325,7 @@ export default function AdminModelsPage() {
                   </label>
                 ) : (
                   <label>
-                    啟用函數
+                    Activation
                     <select value={activation} onChange={(e) => setActivation(e.target.value as Activation)}>
                       <option value="relu">ReLU</option>
                       <option value="tanh">Tanh</option>
@@ -338,15 +338,15 @@ export default function AdminModelsPage() {
                   <input type="number" step="0.05" min={0} max={0.9} value={dropout} onChange={(e) => setDropout(e.target.value)} />
                 </label>
                 <label>
-                  學習率
+                  Learning rate
                   <input type="number" step="0.0001" value={learningRate} onChange={(e) => setLearningRate(e.target.value)} />
                 </label>
                 <label>
-                  訓練輪數 epochs
+                  Epochs
                   <input type="number" min={1} max={1000} value={epochs} onChange={(e) => setEpochs(e.target.value)} />
                 </label>
                 <label>
-                  早停耐心值（0 = 關閉）
+                  Early stopping patience
                   <input type="number" min={0} max={200} value={patience} onChange={(e) => setPatience(e.target.value)} />
                 </label>
                 <label>
@@ -360,6 +360,11 @@ export default function AdminModelsPage() {
                   />
                 </label>
               </div>
+              <p className="order-hint">
+                Hidden sizes 是每層的神經元數，用逗號分隔（例如 <code>64, 32</code> 代表兩層）。
+                Sequence length 是一個樣本往回看幾個交易日，只有 GRU / LSTM 會用到。
+                Early stopping patience 設 0 代表關閉早停。
+              </p>
               <p className="order-hint">
                 Batch size 是一次送進網路幾筆。<b>顯示記憶體不足（CUDA out of memory）時就調小它</b>，
                 代價是訓練變慢；記憶體還很寬裕時調大則會快一些。序列模型每一筆要展開成

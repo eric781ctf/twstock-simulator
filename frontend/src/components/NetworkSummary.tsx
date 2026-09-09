@@ -12,21 +12,21 @@ export function NetworkSummary({ info }: { info: NetworkInfo }) {
     <>
       <div className="network-meta">
         <div className="stat">
-          <span className="label">訓練裝置</span>
+          <span className="label">Device</span>
           <span className="value">{info.device}</span>
         </div>
         <div className="stat">
-          <span className="label">隱藏層</span>
+          <span className="label">Hidden sizes</span>
           <span className="value">{info.hidden_sizes.join(" → ")}</span>
         </div>
         {info.sequence_length ? (
           <div className="stat">
-            <span className="label">序列長度</span>
-            <span className="value">{info.sequence_length} 個交易日</span>
+            <span className="label">Sequence length</span>
+            <span className="value">{info.sequence_length}</span>
           </div>
         ) : (
           <div className="stat">
-            <span className="label">啟用函數</span>
+            <span className="label">Activation</span>
             <span className="value">{info.activation}</span>
           </div>
         )}
@@ -35,19 +35,19 @@ export function NetworkSummary({ info }: { info: NetworkInfo }) {
           <span className="value">{info.dropout}</span>
         </div>
         <div className="stat">
-          <span className="label">訓練輪數</span>
+          <span className="label">Epochs</span>
           <span className="value">
             {info.epochs}
             {info.configured_epochs && info.configured_epochs !== info.epochs
-              ? ` / ${info.configured_epochs}（早停）`
+              ? ` / ${info.configured_epochs} (early stopped)`
               : ""}
           </span>
         </div>
         {info.best_epoch ? (
           <div className="stat">
-            <span className="label">採用的權重</span>
+            <span className="label">Weights used</span>
             <span className="value">
-              {info.patience ? `第 ${info.best_epoch} 輪` : `第 ${info.epochs} 輪（最後一輪）`}
+              {info.patience ? `epoch ${info.best_epoch}` : `epoch ${info.epochs} (last)`}
             </span>
           </div>
         ) : null}
@@ -58,7 +58,7 @@ export function NetworkSummary({ info }: { info: NetworkInfo }) {
           </div>
         ) : null}
         <div className="stat">
-          <span className="label">總參數量</span>
+          <span className="label">Total params</span>
           <span className="value">{info.total_params.toLocaleString()}</span>
         </div>
       </div>
