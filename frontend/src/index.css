@@ -2244,3 +2244,11 @@ tbody tr:hover {
 .cancel-link.danger-link {
   color: var(--sell);
 }
+
+/* 訓練進度：在狀態欄下方以較小的字顯示階段與 epoch */
+.model-progress {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 4px;
+  white-space: nowrap;
+}

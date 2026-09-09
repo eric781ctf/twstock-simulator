@@ -357,6 +357,8 @@ export interface ModelSummary {
   threshold_percent: number;
   score_formula: ScoreFormula;
   training_duration_seconds: number | null;
+  /** 訓練途中才有值，完成或失敗後回到 null */
+  training_progress: TrainingProgress | null;
   error_message: string | null;
   created_at: string;
   trained_at: string | null;
@@ -539,6 +541,18 @@ export interface ModelCatalog {
   top_n: number;
   commission_rate: number;
   tax_rate: number;
+}
+
+export interface TrainingProgress {
+  /** preparing = 組特徵切分資料、training = 跑 epoch、backtesting = 回測 */
+  phase: "preparing" | "training" | "backtesting";
+  updated_at: string;
+  epoch?: number;
+  total_epochs?: number | null;
+  train_loss?: number;
+  validation_loss?: number;
+  best_epoch?: number;
+  best_validation_loss?: number | null;
 }
 
 export interface ModelDeleteResult {

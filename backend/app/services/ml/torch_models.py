@@ -13,6 +13,7 @@ GPU 是必要條件而不是加分項：設定要用 GPU 卻沒有 GPU 時直接
 """
 
 import logging
+from typing import Callable
 
 import numpy as np
 import torch
@@ -335,12 +336,16 @@ def train_torch_dual_task(
     batch_size: int = DEFAULT_BATCH_SIZE,
     model_kind: str = "mlp",
     patience: int = DEFAULT_PATIENCE,
+    on_epoch_end: "Callable[[dict], None] | None" = None,
 ) -> TorchDualTaskModel:
     """x_train 是 (N, 特徵數)（MLP）或 (N, T, 特徵數)（GRU/LSTM）。
 
     patience 是早停的耐心值：連續這麼多個 epoch 的驗證 loss 沒有創新低就停止，
     並且**還原到驗證 loss 最低的那一輪的權重**。設 0 關閉，跑滿所有 epoch 並
     採用最後一輪的權重。
+
+    on_epoch_end 每跑完一輪就被呼叫一次，用來回報進度。這裡刻意用 callback 而
+    不是直接寫資料庫：這個模組只負責訓練，不該知道有資料庫這回事。
     """
     from torch.utils.data import DataLoader, TensorDataset
 
@@ -421,6 +426,22 @@ def train_torch_dual_task(
                 "validation_loss": current_validation,
             }
         )
+
+        if on_epoch_end is not None:
+            # 回報失敗不能拖垮訓練——進度只是附加資訊，訓練本身重要得多
+            try:
+                on_epoch_end(
+                    {
+                        "epoch": epoch,
+                        "total_epochs": epochs,
+                        "train_loss": model.loss_curve[-1]["train_loss"],
+                        "validation_loss": current_validation,
+                        "best_epoch": model.best_epoch,
+                        "best_validation_loss": best_loss if best_loss != float("inf") else None,
+                    }
+                )
+            except Exception:
+                logger.warning("回報第 %d 個 epoch 的進度時失敗，訓練繼續", epoch, exc_info=True)
 
         if current_validation < best_loss - MIN_IMPROVEMENT:
             best_loss = current_validation

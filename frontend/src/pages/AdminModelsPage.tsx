@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { Navigate } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 import { api } from "../api";
 import { ConditionEditor } from "../components/ConditionEditor";
-import { ScoreFormulaExplainer } from "../components/ScoreFormulaExplainer";
 import { useAuth } from "../auth/AuthContext";
 import type {
   Activation,
@@ -22,8 +21,29 @@ const STATUS_LABEL: Record<ModelSummary["status"], string> = {
   failed: "失敗",
 };
 
-// 訓練中的版本要持續看狀態，但訓練動輒數十秒到數分鐘，五分鐘輪詢一次就夠
+// 沒有東西在跑的時候，五分鐘看一次就夠。但只要有模型在訓練，就改成十秒——
+// 進度是逐個 epoch 更新的，五分鐘才刷一次等於看不到它在動。
 const POLL_INTERVAL_MS = 5 * 60 * 1000;
+const ACTIVE_POLL_INTERVAL_MS = 10 * 1000;
+
+const PHASE_LABEL: Record<string, string> = {
+  preparing: "準備資料",
+  training: "訓練中",
+  backtesting: "回測中",
+};
+
+/** 把訓練進度整理成一行字。沒有進度資料就回 null，由呼叫端決定顯示什麼。 */
+function progressText(model: ModelSummary): string | null {
+  const p = model.training_progress;
+  if (!p) return null;
+  const phase = PHASE_LABEL[p.phase] ?? p.phase;
+  if (p.phase !== "training" || !p.epoch) return phase;
+
+  const total = p.total_epochs ? ` / ${p.total_epochs}` : "";
+  const loss = p.validation_loss != null ? `　驗證 loss ${p.validation_loss.toFixed(3)}` : "";
+  const best = p.best_epoch ? `　最佳第 ${p.best_epoch} 輪` : "";
+  return `${phase}　epoch ${p.epoch}${total}${loss}${best}`;
+}
 
 function formatPercent(value: number | null): string {
   if (value == null) return "-";
@@ -107,11 +127,13 @@ export default function AdminModelsPage() {
     });
   }, [isAdmin, refreshModels]);
 
+  const hasRunning = models.some((m) => m.status === "queued" || m.status === "training");
+
   useEffect(() => {
     if (!isAdmin) return;
-    const timer = setInterval(refreshModels, POLL_INTERVAL_MS);
+    const timer = setInterval(refreshModels, hasRunning ? ACTIVE_POLL_INTERVAL_MS : POLL_INTERVAL_MS);
     return () => clearInterval(timer);
-  }, [isAdmin, refreshModels]);
+  }, [isAdmin, refreshModels, hasRunning]);
 
   if (!isAdmin) {
     return <Navigate to="/" replace />;
@@ -229,8 +251,6 @@ export default function AdminModelsPage() {
     .map((v) => Number(v.trim()))
     .filter((v) => Number.isFinite(v) && v > 0);
 
-  const hasRunning = models.some((m) => m.status === "queued" || m.status === "training");
-
   return (
     <>
       <h2 className="section-title">模型管理</h2>
@@ -305,7 +325,7 @@ export default function AdminModelsPage() {
               )}
               <div className="strategy-form-grid">
                 <label>
-                  每層神經元數（用逗號分隔）
+                  Hidden sizes
                   <input
                     placeholder="64, 32"
                     value={hiddenSizes}
@@ -314,7 +334,7 @@ export default function AdminModelsPage() {
                 </label>
                 {isSequence ? (
                   <label>
-                    序列長度（往回看幾個交易日）
+                    Sequence length
                     <input
                       type="number"
                       min={5}
@@ -325,7 +345,7 @@ export default function AdminModelsPage() {
                   </label>
                 ) : (
                   <label>
-                    啟用函數
+                    Activation
                     <select value={activation} onChange={(e) => setActivation(e.target.value as Activation)}>
                       <option value="relu">ReLU</option>
                       <option value="tanh">Tanh</option>
@@ -338,15 +358,15 @@ export default function AdminModelsPage() {
                   <input type="number" step="0.05" min={0} max={0.9} value={dropout} onChange={(e) => setDropout(e.target.value)} />
                 </label>
                 <label>
-                  學習率
+                  Learning rate
                   <input type="number" step="0.0001" value={learningRate} onChange={(e) => setLearningRate(e.target.value)} />
                 </label>
                 <label>
-                  訓練輪數 epochs
+                  Epochs
                   <input type="number" min={1} max={1000} value={epochs} onChange={(e) => setEpochs(e.target.value)} />
                 </label>
                 <label>
-                  早停耐心值（0 = 關閉）
+                  Early stopping patience
                   <input type="number" min={0} max={200} value={patience} onChange={(e) => setPatience(e.target.value)} />
                 </label>
                 <label>
@@ -360,6 +380,11 @@ export default function AdminModelsPage() {
                   />
                 </label>
               </div>
+              <p className="order-hint">
+                Hidden sizes 是每層的神經元數，用逗號分隔（例如 <code>64, 32</code> 代表兩層）。
+                Sequence length 是一個樣本往回看幾個交易日，只有 GRU / LSTM 會用到。
+                Early stopping patience 設 0 代表關閉早停。
+              </p>
               <p className="order-hint">
                 Batch size 是一次送進網路幾筆。<b>顯示記憶體不足（CUDA out of memory）時就調小它</b>，
                 代價是訓練變慢；記憶體還很寬裕時調大則會快一些。序列模型每一筆要展開成
@@ -382,10 +407,12 @@ export default function AdminModelsPage() {
           )}
 
           <h3 className="tutorial-heading">選股分數怎麼算</h3>
-          <ScoreFormulaExplainer
-            info={defaults.score_formula}
-            weights={{ return: Number(returnWeight), probability: Number(probabilityWeight) }}
-          />
+          {/* 權重就是上面那兩個欄位，這裡不重複整套公式說明，連到模型教學即可 */}
+          <p className="order-hint">
+            分數 = {defaults.score_formula.formula.replace("分數 = ", "")}
+            ，兩個權重就是上面的 w₁ / w₂。完整說明見{" "}
+            <Link to="/model-tutorial#score-formula">模型教學</Link>。
+          </p>
 
           <h3 className="tutorial-heading">訓練特徵（已勾選 {features.length} 項）</h3>
           <div className="feature-checkbox-grid">
@@ -466,7 +493,9 @@ export default function AdminModelsPage() {
       <div className="panel">
         <h2>模型版本</h2>
         <p className="order-hint">
-          {hasRunning ? "有模型正在訓練中，狀態每 5 分鐘自動更新一次" : "每次訓練都是新版本，封存後不再參與每日選股，歷史績效仍可查看"}
+          {hasRunning
+            ? "有模型正在訓練中，進度每 10 秒自動更新一次"
+            : "每次訓練都是新版本，封存後不再參與每日選股，歷史績效仍可查看"}
         </p>
         {loading ? (
           <div className="empty-hint">載入中...</div>
@@ -498,7 +527,10 @@ export default function AdminModelsPage() {
                       {m.error_message && <div className="model-error">{m.error_message}</div>}
                     </td>
                     <td>{m.model_type}</td>
-                    <td className={`model-status-${m.status}`}>{STATUS_LABEL[m.status]}</td>
+                    <td className={`model-status-${m.status}`}>
+                      {STATUS_LABEL[m.status]}
+                      {progressText(m) && <div className="model-progress">{progressText(m)}</div>}
+                    </td>
                     <td>{formatDuration(m.training_duration_seconds)}</td>
                     <td>{m.open_holding_count}</td>
                     <td>{m.closed_holding_count}</td>

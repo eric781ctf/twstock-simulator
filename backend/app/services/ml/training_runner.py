@@ -16,6 +16,7 @@ from datetime import date, datetime, timedelta
 
 import numpy as np
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.database import SessionLocal
 from app.models import PredictionModel
@@ -88,6 +89,35 @@ def _labels(rows: list[dict]) -> tuple[np.ndarray, np.ndarray]:
     return y_reg, y_clf
 
 
+def _progress_writer(db: Session, model_id: int):
+    """回傳一個把訓練進度寫進資料庫的函式。
+
+    訓練跑在獨立的 process 裡，跟 API 之間沒有共享記憶體，資料庫是唯一的
+    溝通管道。每個 epoch commit 一次聽起來很多，但相對於一輪動輒數秒的 GPU
+    運算完全可以忽略。
+
+    寫進度失敗一律吞掉：進度只是附加資訊，不值得讓一次訓練因此中斷。
+    """
+
+    def write(phase: str, detail: dict | None = None) -> None:
+        try:
+            model = db.get(PredictionModel, model_id)
+            if model is None:
+                return
+            model.training_progress = {
+                "phase": phase,
+                "updated_at": datetime.now(TAIPEI_TZ).isoformat(),
+                **(detail or {}),
+            }
+            flag_modified(model, "training_progress")
+            db.commit()
+        except Exception:
+            logger.warning("寫入模型 %d 的訓練進度失敗", model_id, exc_info=True)
+            db.rollback()
+
+    return write
+
+
 def _train_sync(model_id: int) -> dict:
     """真正做事的地方，跑在獨立的 process 裡，所以自己開資料庫連線。"""
     db: Session = SessionLocal()
@@ -98,7 +128,11 @@ def _train_sync(model_id: int) -> dict:
             raise ValueError(f"找不到模型 {model_id}")
 
         model.status = "training"
+        model.training_progress = None
         db.commit()
+
+        progress = _progress_writer(db, model_id)
+        progress("preparing")
 
         feature_keys = list(model.feature_config)
         sequence_length = _sequence_length_for(model)
@@ -159,6 +193,7 @@ def _train_sync(model_id: int) -> dict:
         x_train = apply_scaler(x_train_raw, scaler_mean, scaler_std)
         x_validation = apply_scaler(x_validation_raw, scaler_mean, scaler_std)
 
+        progress("training", {"epoch": 0, "total_epochs": (model.network_config or {}).get("epochs")})
         regressor, classifier, metrics = train_dual_task(
             model.model_type,
             feature_keys,
@@ -169,6 +204,7 @@ def _train_sync(model_id: int) -> dict:
             y_validation_reg,
             y_validation_clf,
             network_config=model.network_config,
+            on_epoch_end=lambda info: progress("training", info),
         )
 
         artifact_path = artifacts.save_bundle(
@@ -196,6 +232,7 @@ def _train_sync(model_id: int) -> dict:
         metrics["test"] = evaluate(regressor, classifier, x_test, y_test_reg, y_test_clf)
         del x_train, x_validation, x_test, x_train_raw, x_validation_raw, x_test_raw
 
+        progress("backtesting")
         metrics["backtest"] = run_backtest(db, model, bundle, test_rows, bars_by_code)
         metrics["warnings"] = build_data_warnings(
             metrics["train"], metrics["validation"], metrics["test"], metrics.get("network")
@@ -204,6 +241,7 @@ def _train_sync(model_id: int) -> dict:
         model.metrics = metrics
         model.model_artifact_path = artifact_path
         model.status = "completed"
+        model.training_progress = None  # 完成後清掉，狀態與 metrics 才是唯一真相
         model.trained_at = datetime.now(TAIPEI_TZ)
         model.training_duration_seconds = time.perf_counter() - started
         db.commit()

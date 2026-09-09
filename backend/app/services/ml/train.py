@@ -248,6 +248,7 @@ def train_dual_task(
     y_validation_reg: np.ndarray,
     y_validation_clf: np.ndarray,
     network_config: dict | None = None,
+    on_epoch_end=None,
 ) -> tuple[object, object, dict]:
     """訓練並用驗證集評估。回傳 (迴歸模型, 分類模型, metrics)。
 
@@ -278,6 +279,7 @@ def train_dual_task(
             model_kind=model_type,
             patience=int(config.get("patience", 10)),
             batch_size=int(config.get("batch_size", 512)),
+            on_epoch_end=on_epoch_end,
         )
         regressor = torch_model.as_regressor()
         classifier = torch_model.as_classifier()

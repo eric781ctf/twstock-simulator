@@ -76,6 +76,7 @@ def _to_summary(model: PredictionModel, stats: dict) -> ModelSummaryOut:
         threshold_percent=model.threshold_percent,
         score_formula=model.score_formula,
         training_duration_seconds=model.training_duration_seconds,
+        training_progress=model.training_progress,
         error_message=model.error_message,
         created_at=model.created_at,
         trained_at=model.trained_at,
