@@ -21,8 +21,29 @@ const STATUS_LABEL: Record<ModelSummary["status"], string> = {
   failed: "失敗",
 };
 
-// 訓練中的版本要持續看狀態，但訓練動輒數十秒到數分鐘，五分鐘輪詢一次就夠
+// 沒有東西在跑的時候，五分鐘看一次就夠。但只要有模型在訓練，就改成十秒——
+// 進度是逐個 epoch 更新的，五分鐘才刷一次等於看不到它在動。
 const POLL_INTERVAL_MS = 5 * 60 * 1000;
+const ACTIVE_POLL_INTERVAL_MS = 10 * 1000;
+
+const PHASE_LABEL: Record<string, string> = {
+  preparing: "準備資料",
+  training: "訓練中",
+  backtesting: "回測中",
+};
+
+/** 把訓練進度整理成一行字。沒有進度資料就回 null，由呼叫端決定顯示什麼。 */
+function progressText(model: ModelSummary): string | null {
+  const p = model.training_progress;
+  if (!p) return null;
+  const phase = PHASE_LABEL[p.phase] ?? p.phase;
+  if (p.phase !== "training" || !p.epoch) return phase;
+
+  const total = p.total_epochs ? ` / ${p.total_epochs}` : "";
+  const loss = p.validation_loss != null ? `　驗證 loss ${p.validation_loss.toFixed(3)}` : "";
+  const best = p.best_epoch ? `　最佳第 ${p.best_epoch} 輪` : "";
+  return `${phase}　epoch ${p.epoch}${total}${loss}${best}`;
+}
 
 function formatPercent(value: number | null): string {
   if (value == null) return "-";
@@ -106,11 +127,13 @@ export default function AdminModelsPage() {
     });
   }, [isAdmin, refreshModels]);
 
+  const hasRunning = models.some((m) => m.status === "queued" || m.status === "training");
+
   useEffect(() => {
     if (!isAdmin) return;
-    const timer = setInterval(refreshModels, POLL_INTERVAL_MS);
+    const timer = setInterval(refreshModels, hasRunning ? ACTIVE_POLL_INTERVAL_MS : POLL_INTERVAL_MS);
     return () => clearInterval(timer);
-  }, [isAdmin, refreshModels]);
+  }, [isAdmin, refreshModels, hasRunning]);
 
   if (!isAdmin) {
     return <Navigate to="/" replace />;
@@ -227,8 +250,6 @@ export default function AdminModelsPage() {
     .split(/[,\s]+/)
     .map((v) => Number(v.trim()))
     .filter((v) => Number.isFinite(v) && v > 0);
-
-  const hasRunning = models.some((m) => m.status === "queued" || m.status === "training");
 
   return (
     <>
@@ -472,7 +493,9 @@ export default function AdminModelsPage() {
       <div className="panel">
         <h2>模型版本</h2>
         <p className="order-hint">
-          {hasRunning ? "有模型正在訓練中，狀態每 5 分鐘自動更新一次" : "每次訓練都是新版本，封存後不再參與每日選股，歷史績效仍可查看"}
+          {hasRunning
+            ? "有模型正在訓練中，進度每 10 秒自動更新一次"
+            : "每次訓練都是新版本，封存後不再參與每日選股，歷史績效仍可查看"}
         </p>
         {loading ? (
           <div className="empty-hint">載入中...</div>
@@ -504,7 +527,10 @@ export default function AdminModelsPage() {
                       {m.error_message && <div className="model-error">{m.error_message}</div>}
                     </td>
                     <td>{m.model_type}</td>
-                    <td className={`model-status-${m.status}`}>{STATUS_LABEL[m.status]}</td>
+                    <td className={`model-status-${m.status}`}>
+                      {STATUS_LABEL[m.status]}
+                      {progressText(m) && <div className="model-progress">{progressText(m)}</div>}
+                    </td>
                     <td>{formatDuration(m.training_duration_seconds)}</td>
                     <td>{m.open_holding_count}</td>
                     <td>{m.closed_holding_count}</td>

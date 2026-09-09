@@ -26,4 +26,5 @@ def run_lightweight_migrations(engine: Engine) -> None:
         # 單日成交股數會超過 int4 上限，改成 bigint（放大型別，不會動到既有資料）
         conn.execute(text("ALTER TABLE daily_bars ALTER COLUMN volume TYPE BIGINT"))
         conn.execute(text("ALTER TABLE prediction_models ADD COLUMN IF NOT EXISTS network_config JSON"))
+        conn.execute(text("ALTER TABLE prediction_models ADD COLUMN IF NOT EXISTS training_progress JSON"))
     logger.info("run_lightweight_migrations 完成")

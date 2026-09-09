@@ -301,6 +301,9 @@ class PredictionModel(Base):
     is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     metrics: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     training_duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # 訓練途中的進度（階段、第幾個 epoch、當下的 loss）。訓練跑在獨立的 process 裡，
+    # 這是它跟 API 之間唯一的溝通管道——每個 epoch 各 commit 一次，admin 頁面輪詢就看得到。
+    training_progress: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     model_artifact_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
     error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

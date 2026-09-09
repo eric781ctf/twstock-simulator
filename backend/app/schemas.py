@@ -340,6 +340,8 @@ class ModelSummaryOut(BaseModel):
     threshold_percent: float
     score_formula: str
     training_duration_seconds: float | None
+    # 訓練途中才有值（階段、第幾個 epoch、當下的 loss），完成或失敗後回到 None
+    training_progress: dict | None = None
     error_message: str | None
     created_at: datetime
     trained_at: datetime | None
