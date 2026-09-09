@@ -3,11 +3,13 @@ import logging
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal, get_db
-from app.models import User
+from app.models import ChipDaily, User
 from app.schemas import (
+    ChipStatusOut,
     AdminAccountOut,
     AdminAmountIn,
     BackfillProgressOut,
@@ -20,6 +22,7 @@ from app.schemas import (
     SchedulerFlagOut,
 )
 from app.services import backfill_status
+from app.services.chip_sync import backfill_chip_data, earliest_chip_date, latest_chip_date
 from app.services.admin import AdminActionError, add_cash_to_all, delete_account, freeze_account, list_all_accounts
 from app.services.app_config import (
     get_default_initial_cash,
@@ -134,6 +137,43 @@ async def trigger_backfill(payload: BackfillTargetIn, db: Session = Depends(get_
     months = set_target_backfill_months(db, payload.target_months)
     asyncio.create_task(_run_backfill_task(months))
     return _backfill_status_out(db, months)
+
+
+async def _run_chip_backfill_task(months: int) -> None:
+    """籌碼面回補的背景工作。自己開 session——背景任務不能沿用請求範圍的那個。"""
+    db = SessionLocal()
+    try:
+        end = date.today()
+        start = end - timedelta(days=months * 31)
+        await backfill_chip_data(db, start, end)
+    except Exception:
+        logger.exception("籌碼面回補失敗")
+    finally:
+        db.close()
+
+
+@router.get("/models/chip-status", response_model=ChipStatusOut)
+def get_chip_status(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    total = db.query(func.count(ChipDaily.id)).scalar() or 0
+    return ChipStatusOut(
+        earliest_date=earliest_chip_date(db),
+        latest_date=latest_chip_date(db),
+        total_rows=total,
+        progress=BackfillProgressOut(**backfill_status.snapshot()),
+    )
+
+
+@router.post("/models/chip-backfill", response_model=ChipStatusOut)
+async def trigger_chip_backfill(
+    payload: BackfillTargetIn, db: Session = Depends(get_db), _: User = Depends(require_admin)
+):
+    """回補籌碼面資料。跟日K回補共用同一個進度狀態，所以兩者不能同時跑——
+    真的同時跑只會讓對 TWSE 的請求密度加倍，正是節流想避免的事。"""
+    if backfill_status.is_active():
+        raise HTTPException(status_code=409, detail="已經有一輪回補正在進行中，請等它跑完")
+
+    asyncio.create_task(_run_chip_backfill_task(payload.target_months))
+    return get_chip_status(db)
 
 
 @router.get("/models/schedulers", response_model=list[SchedulerFlagOut])

@@ -134,6 +134,8 @@ export type BackfillPhase =
   | "failed";
 
 export interface BackfillProgress {
+  job: string;
+  job_label: string;
   phase: BackfillPhase;
   phase_label: string;
   current_target: string | null;
@@ -563,4 +565,11 @@ export interface ModelDeleteResult {
   deleted_holdings: number;
   deleted_scoring_runs: number;
   removed_artifact: boolean;
+}
+
+export interface ChipStatus {
+  earliest_date: string | null;
+  latest_date: string | null;
+  total_rows: number;
+  progress: BackfillProgress;
 }

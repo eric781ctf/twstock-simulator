@@ -15,7 +15,7 @@ from datetime import date
 
 from sqlalchemy.orm import Session
 
-from app.models import DailyBar, Market, Stock, StockValuationHistory
+from app.models import ChipDaily, DailyBar, Market, Stock, StockValuationHistory
 from app.services.indicators import compute_kd_series, cumulative_change_percent, latest_ma, streak
 
 logger = logging.getLogger(__name__)
@@ -51,6 +51,14 @@ FEATURE_KEYS = [
     # 個股相對大盤的強弱——把市場方向這個最大的共同雜訊源減掉之後剩下的部分
     "relative_return_1d",
     "relative_return_20d",
+    # 籌碼面：誰在買、誰在賣。台股外資比重高，法人買賣超是這個市場長期被
+    # 討論最多的訊號之一。一律除以成交量做正規化——原始股數在台積電和小型股
+    # 之間差好幾個數量級，不除的話模型學到的會是「這是不是大型股」。
+    "foreign_net_ratio",
+    "foreign_net_ratio_5d",
+    "trust_net_ratio",
+    "institution_net_ratio",
+    "margin_change_5d",
 ]
 
 FEATURE_LABELS: dict[str, str] = {
@@ -80,6 +88,11 @@ FEATURE_LABELS: dict[str, str] = {
     "market_ma20_bias": "大盤 20 日均線乖離率",
     "relative_return_1d": "相對大盤強弱（當日）",
     "relative_return_20d": "相對大盤強弱（近 20 日）",
+    "foreign_net_ratio": "外資買賣超 / 成交量",
+    "foreign_net_ratio_5d": "外資近 5 日買賣超 / 近 5 日成交量",
+    "trust_net_ratio": "投信買賣超 / 成交量",
+    "institution_net_ratio": "三大法人買賣超 / 成交量",
+    "margin_change_5d": "融資餘額近 5 日變化率",
 }
 
 DEFAULT_FEATURES = [
@@ -99,6 +112,14 @@ DEFAULT_FEATURES = [
     # 減掉大盤之後剩下的才是這檔股票「自己」的表現
     "relative_return_1d",
     "relative_return_20d",
+    # 籌碼面：誰在買、誰在賣。台股外資比重高，法人買賣超是這個市場長期被
+    # 討論最多的訊號之一。一律除以成交量做正規化——原始股數在台積電和小型股
+    # 之間差好幾個數量級，不除的話模型學到的會是「這是不是大型股」。
+    "foreign_net_ratio",
+    "foreign_net_ratio_5d",
+    "trust_net_ratio",
+    "institution_net_ratio",
+    "margin_change_5d",
 ]
 
 # 大盤特徵（每日只算一次、所有股票共用的那幾個）
@@ -108,6 +129,15 @@ MARKET_FEATURE_KEYS = [
     "market_return_20d",
     "market_breadth",
     "market_ma20_bias",
+]
+
+# 籌碼面特徵（資料缺這幾天時要補 None 的那些）
+CHIP_FEATURE_KEYS = [
+    "foreign_net_ratio",
+    "foreign_net_ratio_5d",
+    "trust_net_ratio",
+    "institution_net_ratio",
+    "margin_change_5d",
 ]
 
 # 指標要算得準（尤其 MA60）需要的暖身天數；資料不足這個長度的股票不會產生特徵列
@@ -225,6 +255,86 @@ def compute_feature_row(bars: list[DailyBar], kd_series: list[tuple[float, float
     }
 
 
+def load_chip_data(db: Session, start: date, end: date) -> dict[str, dict[date, dict]]:
+    """籌碼面資料，依股票代碼與日期建索引。"""
+    rows = (
+        db.query(
+            ChipDaily.stock_code,
+            ChipDaily.trade_date,
+            ChipDaily.foreign_net,
+            ChipDaily.trust_net,
+            ChipDaily.institution_net,
+            ChipDaily.margin_balance,
+        )
+        .filter(ChipDaily.trade_date >= start, ChipDaily.trade_date <= end)
+        .all()
+    )
+    by_code: dict[str, dict[date, dict]] = defaultdict(dict)
+    for code, day, foreign, trust, institution, margin in rows:
+        by_code[code][day] = {
+            "foreign_net": foreign,
+            "trust_net": trust,
+            "institution_net": institution,
+            "margin_balance": margin,
+        }
+    return dict(by_code)
+
+
+def _chip_features(bars: list[DailyBar], index: int, chips: dict[date, dict]) -> dict:
+    """算某一天的籌碼面特徵。只看 bars[:index+1]，不碰未來。
+
+    買賣超一律除以成交量：原始股數在台積電（單日上億股）和小型股（幾十萬股）
+    之間差好幾個數量級，直接餵進去的話模型學到的會是「這是不是大型股」，
+    而不是「今天法人動作多大」。除以成交量之後才是跨股票可比的強度。
+    """
+    empty = {key: None for key in CHIP_FEATURE_KEYS}
+    if not chips:
+        return empty
+
+    today = bars[index]
+    chip_today = chips.get(today.trade_date)
+    if not chip_today:
+        return empty
+
+    def ratio(net: int | None) -> float | None:
+        if net is None or not today.volume:
+            return None
+        return net / today.volume * 100
+
+    result = {
+        "foreign_net_ratio": ratio(chip_today.get("foreign_net")),
+        "trust_net_ratio": ratio(chip_today.get("trust_net")),
+        "institution_net_ratio": ratio(chip_today.get("institution_net")),
+        "foreign_net_ratio_5d": None,
+        "margin_change_5d": None,
+    }
+
+    # 近 5 日：買賣超合計除以成交量合計，而不是每天的比率再平均——
+    # 後者會讓成交量很小的那幾天有不成比例的權重
+    window = bars[max(0, index - 4) : index + 1]
+    net_sum = 0
+    volume_sum = 0
+    has_any = False
+    for bar in window:
+        chip = chips.get(bar.trade_date)
+        if chip and chip.get("foreign_net") is not None and bar.volume:
+            net_sum += chip["foreign_net"]
+            volume_sum += bar.volume
+            has_any = True
+    if has_any and volume_sum:
+        result["foreign_net_ratio_5d"] = net_sum / volume_sum * 100
+
+    # 融資餘額的變化率。餘額本身跟股本大小綁在一起、跨股票不可比，變化率才可比
+    if index >= 5:
+        past = chips.get(bars[index - 5].trade_date)
+        current_margin = chip_today.get("margin_balance")
+        past_margin = past.get("margin_balance") if past else None
+        if current_margin is not None and past_margin:
+            result["margin_change_5d"] = (current_margin - past_margin) / past_margin * 100
+
+    return result
+
+
 def build_market_series(bars_by_code: dict[str, list[DailyBar]]) -> dict[date, dict]:
     """從全市場的日K算出每個交易日的大盤狀態。
 
@@ -315,6 +425,7 @@ def build_feature_rows(
     valuations_by_code = load_valuations(db, fetch_start, fetch_end)
     # 大盤狀態每個交易日只算一次，所有股票共用同一份
     market_series = build_market_series(bars_by_code)
+    chips_by_code = load_chip_data(db, fetch_start, fetch_end)
 
     rows: list[dict] = []
     for code, bars in bars_by_code.items():
@@ -323,6 +434,7 @@ def build_feature_rows(
 
         kd_series = compute_kd_series(bars)
         snapshots = valuations_by_code.get(code, [])
+        chips = chips_by_code.get(code, {})
         cursor = 0
 
         for index, bar in enumerate(bars):
@@ -339,6 +451,7 @@ def build_feature_rows(
             row.update(market or {key: None for key in MARKET_FEATURE_KEYS})
             # 相對強弱要在個股特徵算完之後才算得出來（它用到 change_percent）
             row.update(_relative_features(row, market))
+            row.update(_chip_features(bars, index, chips))
             rows.append(row)
 
     logger.info(

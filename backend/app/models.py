@@ -310,6 +310,36 @@ class PredictionModel(Base):
     trained_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class ChipDaily(Base):
+    """每檔股票、每個交易日的籌碼面資料（三大法人買賣超與信用交易餘額）。
+
+    台股外資持股比重高，法人買賣超是這個市場長期被討論最多的訊號之一。
+    資料來自 TWSE 每日公開的 T86（三大法人買賣超日報）與 MI_MARGN（融資融券），
+    兩支都是「一次一天、拿全市場」，跟日K回補走同一種請求形狀。
+
+    單位保持 TWSE 原始的樣子：法人買賣超是「股數」，信用交易餘額是「交易單位
+    （張）」。兩者不換算成同一單位——特徵那邊本來就要各自除以成交量或前值做
+    正規化，先換算只會多一次無意義的乘除。
+    """
+
+    __tablename__ = "chip_daily"
+    __table_args__ = (UniqueConstraint("stock_code", "trade_date", name="uq_chip_daily_code_date"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    stock_code: Mapped[str] = mapped_column(ForeignKey("stocks.code"), nullable=False, index=True)
+    trade_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+
+    # 買賣超股數，正數是買超。外資這欄不含外資自營商，跟 TWSE 的主要欄位一致
+    foreign_net: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    trust_net: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    dealer_net: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    institution_net: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+    # 信用交易餘額（張）。融資餘額常被當成散戶槓桿的代理
+    margin_balance: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    short_balance: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+
 class ModelScoringRun(Base):
     """每個模型每一天跑選股/出場判斷的執行紀錄，主要是為了記錄耗時，順便當成
     每日排程的稽核軌跡（哪天跑了、成功還失敗）。"""
