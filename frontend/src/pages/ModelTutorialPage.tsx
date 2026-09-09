@@ -229,6 +229,16 @@ export default function ModelTutorialPage() {
       .catch((e) => setError(e instanceof Error ? e.message : "載入失敗"));
   }, []);
 
+  useEffect(() => {
+    if (!catalog || window.location.hash !== "#score-formula") return;
+    // 這一段在「系統怎麼運作」子頁底下，先切過去才捲得到
+    setSubTab("business");
+    // 等這次 render 把該區塊放進 DOM 再捲
+    requestAnimationFrame(() => {
+      document.getElementById("score-formula")?.scrollIntoView({ block: "start", behavior: "smooth" });
+    });
+  }, [catalog]);
+
   /** 依後端實際回報的類型分組。後端有、但這裡沒歸類的，統一落到「其他」 */
   const groups = useMemo(() => {
     if (!catalog) return [];
@@ -426,7 +436,7 @@ function BusinessSection({ catalog }: { catalog: ModelCatalog }) {
         </p>
       </section>
 
-      <section className="panel tutorial-card">
+      <section className="panel tutorial-card" id="score-formula">
         <h3 className="tutorial-heading">選股分數怎麼算</h3>
         <ScoreFormulaExplainer info={catalog.score_formula} />
       </section>

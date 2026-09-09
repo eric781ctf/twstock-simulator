@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { Navigate } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 import { api } from "../api";
 import { ConditionEditor } from "../components/ConditionEditor";
-import { ScoreFormulaExplainer } from "../components/ScoreFormulaExplainer";
 import { useAuth } from "../auth/AuthContext";
 import type {
   Activation,
@@ -387,10 +386,12 @@ export default function AdminModelsPage() {
           )}
 
           <h3 className="tutorial-heading">選股分數怎麼算</h3>
-          <ScoreFormulaExplainer
-            info={defaults.score_formula}
-            weights={{ return: Number(returnWeight), probability: Number(probabilityWeight) }}
-          />
+          {/* 權重就是上面那兩個欄位，這裡不重複整套公式說明，連到模型教學即可 */}
+          <p className="order-hint">
+            分數 = {defaults.score_formula.formula.replace("分數 = ", "")}
+            ，兩個權重就是上面的 w₁ / w₂。完整說明見{" "}
+            <Link to="/model-tutorial#score-formula">模型教學</Link>。
+          </p>
 
           <h3 className="tutorial-heading">訓練特徵（已勾選 {features.length} 項）</h3>
           <div className="feature-checkbox-grid">

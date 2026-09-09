@@ -6,7 +6,6 @@ import { FeatureImportanceChart } from "../components/FeatureImportanceChart";
 import { NetworkSummary } from "../components/NetworkSummary";
 import { PredictionScatterChart } from "../components/PredictionScatterChart";
 import { ReturnScatterChart } from "../components/ReturnScatterChart";
-import { ScoreFormulaExplainer } from "../components/ScoreFormulaExplainer";
 import type { ModelDetail, ModelHoldingItem } from "../types";
 
 const EXIT_REASON_LABEL: Record<string, string> = {
@@ -198,7 +197,19 @@ export default function ModelDetailPage() {
         <p className="order-hint">
           每個交易日收盤後，模型會對全部上市股票各算一個分數，取最高的前 10 名買進。
         </p>
-        <ScoreFormulaExplainer info={detail.score_formula_info} weights={detail.score_weights} />
+        {/* 公式的完整說明只寫在模型教學一處，這裡只放這個模型自己的權重再連過去，
+            免得同一套解釋散在多頁、改了其中一份就開始互相矛盾 */}
+        <div className="formula-box">
+          <div className="formula-main">{detail.score_formula_info.formula}</div>
+          <div className="formula-weights">
+            這個模型的權重：w₁（預期報酬）= <b>{detail.score_weights?.return ?? 0.5}</b>　 w₂（達標機率）={" "}
+            <b>{detail.score_weights?.probability ?? 0.5}</b>
+          </div>
+        </div>
+        <p className="order-hint">
+          這個公式在算什麼、為什麼要先做橫斷面標準化、它沒有解決什麼——
+          <Link to="/model-tutorial#score-formula">模型教學裡有完整說明</Link>。
+        </p>
       </div>
 
       <h2 className="section-title">模型準確度</h2>
