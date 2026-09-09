@@ -241,7 +241,6 @@ export interface TrainDefaults {
   test_start: string;
   test_end: string;
   default_features: string[];
-  raw_close_only_features: string[];
   features: FeatureOption[];
   model_types: ModelTypeOption[];
   score_formula: ScoreFormulaInfo;

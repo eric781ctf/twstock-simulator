@@ -101,10 +101,6 @@ DEFAULT_FEATURES = [
     "relative_return_20d",
 ]
 
-# 只丟收盤價的「不指定特徵」模式用的特徵組合。留一個具名常數而不是讓前端
-# 自己湊 ["close"]，是為了讓「這個模式代表什麼」只有後端一份定義。
-RAW_CLOSE_ONLY_FEATURES = ["close"]
-
 # 大盤特徵（每日只算一次、所有股票共用的那幾個）
 MARKET_FEATURE_KEYS = [
     "market_return_1d",

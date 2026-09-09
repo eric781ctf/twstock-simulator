@@ -2252,14 +2252,3 @@ tbody tr:hover {
   margin-top: 4px;
   white-space: nowrap;
 }
-
-/* 「不指定特徵」開關與被它停用的特徵格 */
-.raw-only-toggle {
-  display: inline-flex;
-  margin-bottom: 8px;
-}
-
-.feature-checkbox-grid.disabled {
-  opacity: 0.4;
-  pointer-events: none;
-}

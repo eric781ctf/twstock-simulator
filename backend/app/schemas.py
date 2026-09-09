@@ -285,8 +285,6 @@ class TrainDefaultsOut(BaseModel):
     test_start: date
     test_end: date
     default_features: list[str]
-    # 「不指定特徵」模式實際會送出的特徵組合，由後端定義
-    raw_close_only_features: list[str]
     features: list[FeatureOptionOut]
     model_types: list[ModelTypeOptionOut]
     score_formula: ScoreFormulaInfoOut
