@@ -36,7 +36,19 @@ import type {
   WatchlistItem,
 } from "./types";
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+/** 後端位址。
+ *
+ * 預設用「開啟這個網頁的主機」去組，而不是寫死 localhost。寫死的話，從別台
+ * 裝置連進來時瀏覽器會去打**那台裝置自己的** localhost:8000，什麼都不會有——
+ * 頁面框架載得出來但所有資料都是 Failed to fetch。
+ *
+ * 這樣寫的好處是位址變了也不用改設定：用 localhost 開就打 localhost，用
+ * 192.168.0.11 開就打 192.168.0.11，用外網 IP 開就打那個外網 IP。
+ * 要指到別的地方（例如後端在另一台機器）再用 VITE_API_BASE_URL 覆蓋。
+ */
+const API_PORT = 8000;
+const BASE_URL =
+  import.meta.env.VITE_API_BASE_URL ?? `${window.location.protocol}//${window.location.hostname}:${API_PORT}`;
 const TOKEN_KEY = "twstock_token";
 
 export function getToken(): string | null {

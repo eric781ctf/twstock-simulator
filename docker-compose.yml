@@ -8,7 +8,10 @@ services:
     volumes:
       - db_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      # 只綁 loopback。不加 127.0.0.1 的話 Docker 會把 5432 發佈到所有網卡，
+      # 這台機器一旦對外開放，資料庫就跟著曝露出去了——那比應用程式本身
+      # 被人打開嚴重得多。本機用工具連 127.0.0.1:5432 不受影響。
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U twstock"]
       interval: 5s
@@ -20,6 +23,9 @@ services:
     environment:
       TWSTOCK_DATABASE_URL: postgresql+psycopg2://twstock:${POSTGRES_PASSWORD}@db:5432/twstock
       TWSTOCK_JWT_SECRET: ${TWSTOCK_JWT_SECRET}
+      # 要從別台裝置連進來才需要設定，見 .env.example。沒設就是空字串，
+      # 維持只允許 localhost 的預設行為。
+      TWSTOCK_CORS_ORIGIN_REGEX: ${TWSTOCK_CORS_ORIGIN_REGEX:-}
     depends_on:
       db:
         condition: service_healthy
@@ -39,8 +45,9 @@ services:
 
   frontend:
     build: ./frontend
-    environment:
-      VITE_API_BASE_URL: http://localhost:8000
+    # 刻意不設 VITE_API_BASE_URL：前端會依「開啟網頁的主機」自己組後端位址，
+    # 所以用 localhost、區網 IP 還是外網 IP 開都能用，位址變了也不用改這裡。
+    # 後端若不在同一台機器，再把這個變數加回來指過去。
     depends_on:
       - backend
     ports:
