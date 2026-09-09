@@ -285,6 +285,15 @@ class ScoreFormulaInfoOut(BaseModel):
     limitation: str
 
 
+class FeaturePresetOut(BaseModel):
+    """現成的特徵組合。71 個勾選框沒辦法用，預設集才是實際的操作方式。"""
+
+    key: str
+    label: str
+    description: str
+    features: list[str]
+
+
 class TrainDefaultsOut(BaseModel):
     """給訓練表單用的預設值與可選項目：建議的六個切分日期（依本地資料最新
     日期往回推）、可勾選的特徵、可選的模型類型。"""
@@ -297,6 +306,7 @@ class TrainDefaultsOut(BaseModel):
     test_start: date
     test_end: date
     default_features: list[str]
+    feature_presets: list[FeaturePresetOut]
     features: list[FeatureOptionOut]
     model_types: list[ModelTypeOptionOut]
     score_formula: ScoreFormulaInfoOut

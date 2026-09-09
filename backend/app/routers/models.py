@@ -15,6 +15,7 @@ from app.database import get_db
 from app.models import ModelHolding, ModelPrediction, ModelScoringRun, PredictionModel, User
 from app.schemas import (
     FeatureOptionOut,
+    FeaturePresetOut,
     ModelDeleteResultOut,
     ModelSummaryOut,
     ModelTrainRequest,
@@ -25,7 +26,7 @@ from app.schemas import (
 from app.services.auth import require_admin
 from app.services.ml import artifacts
 from app.services.ml.dataset import LABEL_MODE_LABELS
-from app.services.ml.features import DEFAULT_FEATURES, FEATURE_KEYS, FEATURE_LABELS
+from app.services.ml.features import DEFAULT_FEATURES, FEATURE_KEYS, FEATURE_LABELS, FEATURE_PRESETS
 from app.services.ml.inference import latest_bar_date
 from app.services.ml.performance import summarize_holdings
 from app.services.ml.train import (
@@ -51,6 +52,7 @@ def get_train_defaults(db: Session = Depends(get_db), _: User = Depends(require_
         latest_data_date=latest,
         **suggest_split_dates(latest),
         default_features=DEFAULT_FEATURES,
+        feature_presets=[FeaturePresetOut(**preset) for preset in FEATURE_PRESETS],
         features=[FeatureOptionOut(key=key, label=FEATURE_LABELS[key]) for key in FEATURE_KEYS],
         model_types=[
             ModelTypeOptionOut(

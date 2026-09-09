@@ -235,6 +235,13 @@ export interface ScoreFormulaInfo {
   limitation: string;
 }
 
+export interface FeaturePreset {
+  key: string;
+  label: string;
+  description: string;
+  features: string[];
+}
+
 export interface TrainDefaults {
   latest_data_date: string | null;
   train_start: string;
@@ -244,6 +251,7 @@ export interface TrainDefaults {
   test_start: string;
   test_end: string;
   default_features: string[];
+  feature_presets: FeaturePreset[];
   features: FeatureOption[];
   model_types: ModelTypeOption[];
   score_formula: ScoreFormulaInfo;

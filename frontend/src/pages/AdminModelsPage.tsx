@@ -77,6 +77,7 @@ export default function AdminModelsPage() {
   const [family, setFamily] = useState("");
   const [modelType, setModelType] = useState<ModelType>("lightgbm");
   const [features, setFeatures] = useState<string[]>([]);
+  const [presetKey, setPresetKey] = useState("curated");
   const [nDays, setNDays] = useState("5");
   const [threshold, setThreshold] = useState("3");
   const [labelMode, setLabelMode] = useState<LabelMode>("excess");
@@ -143,6 +144,15 @@ export default function AdminModelsPage() {
 
   function toggleFeature(key: string) {
     setFeatures((prev) => (prev.includes(key) ? prev.filter((f) => f !== key) : [...prev, key]));
+    // 手動動過就不再是任何一個預設集了。不改成「自訂」的話，畫面會宣稱還在
+    // 「精選」但送出的清單其實已經不一樣
+    setPresetKey("custom");
+  }
+
+  function applyPreset(key: string) {
+    setPresetKey(key);
+    const preset = defaults?.feature_presets.find((p) => p.key === key);
+    if (preset) setFeatures(preset.features);
   }
 
   function optionalNumber(value: string): number | null {
@@ -433,7 +443,24 @@ export default function AdminModelsPage() {
             <Link to="/model-tutorial#score-formula">模型教學</Link>。
           </p>
 
-          <h3 className="tutorial-heading">訓練特徵（已勾選 {features.length} 項）</h3>
+          <h3 className="tutorial-heading">訓練特徵（已勾選 {features.length} / {defaults.features.length} 項）</h3>
+          <div className="strategy-form-grid">
+            <label>
+              特徵集
+              <select value={presetKey} onChange={(e) => applyPreset(e.target.value)}>
+                {defaults.feature_presets.map((p) => (
+                  <option key={p.key} value={p.key}>
+                    {p.label}（{p.features.length} 項）
+                  </option>
+                ))}
+                <option value="custom">自訂</option>
+              </select>
+            </label>
+          </div>
+          <p className="order-hint">
+            {defaults.feature_presets.find((p) => p.key === presetKey)?.description ??
+              "自己勾選要用哪些特徵。動過任何一個勾選就會切換到這個模式。"}
+          </p>
           <div className="feature-checkbox-grid">
             {defaults.features.map((f) => (
               <label key={f.key} className={features.includes(f.key) ? "feature-checkbox active" : "feature-checkbox"}>

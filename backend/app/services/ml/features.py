@@ -13,47 +13,43 @@ import logging
 from collections import defaultdict
 from datetime import date
 
+import numpy as np
+import pandas as pd
 from sqlalchemy.orm import Session
 
 from app.models import ChipDaily, DailyBar, Market, Stock, StockValuationHistory
-from app.services.indicators import compute_kd_series, cumulative_change_percent, latest_ma, streak
+from app.services.indicators import compute_kd_series
+from app.services.ml.price_features import (
+    PRICE_FEATURE_KEYS,
+    WINDOWS,
+    build_price_frame,
+    compute_price_features,
+)
 
 logger = logging.getLogger(__name__)
 
 # 每個特徵的 key 就是給前端勾選用的識別字串
-FEATURE_KEYS = [
-    "close",
-    "volume",
-    "volume_ratio_5",
-    "change_percent",
-    "ma5_bias",
-    "ma20_bias",
-    "ma60_bias",
-    "ma5_over_ma20",
-    "ma20_over_ma60",
-    "k_value",
-    "d_value",
-    "k_minus_d",
-    "streak_days",
-    "cumulative_change_5",
-    "cumulative_change_20",
-    "volatility_20",
-    "pe_ratio",
-    "dividend_yield",
-    "pb_ratio",
-    # 大盤（全市場）特徵：讓模型看得到「今天整個市場是什麼狀況」。
-    # 少了這些，「這檔今天漲 3%」在大盤漲 2% 和跌 2% 的日子對模型是同一件事。
+# 完整的特徵清單由各來源拼起來，不手寫第二份——手寫的那份遲早會跟實際
+# 算出來的欄位對不上，而那種不一致只會在訓練炸掉時才被發現。
+_KD_FEATURE_KEYS = ["k_value", "d_value", "k_minus_d"]
+_VALUATION_FEATURE_KEYS = ["pe_ratio", "dividend_yield", "pb_ratio"]
+
+# 大盤（全市場）特徵：讓模型看得到「今天整個市場是什麼狀況」。少了這些，
+# 「這檔今天漲 3%」在大盤漲 2% 和跌 2% 的日子對模型是同一件事。
+MARKET_FEATURE_KEYS = [
     "market_return_1d",
     "market_return_5d",
     "market_return_20d",
     "market_breadth",
     "market_ma20_bias",
-    # 個股相對大盤的強弱——把市場方向這個最大的共同雜訊源減掉之後剩下的部分
-    "relative_return_1d",
-    "relative_return_20d",
-    # 籌碼面：誰在買、誰在賣。台股外資比重高，法人買賣超是這個市場長期被
-    # 討論最多的訊號之一。一律除以成交量做正規化——原始股數在台積電和小型股
-    # 之間差好幾個數量級，不除的話模型學到的會是「這是不是大型股」。
+]
+
+# 個股相對大盤的強弱——把市場方向這個最大的共同雜訊源減掉之後剩下的部分
+_RELATIVE_FEATURE_KEYS = ["relative_return_1d", "relative_return_20d"]
+
+# 籌碼面：誰在買、誰在賣。一律除以成交量做正規化——原始股數在台積電和小型股
+# 之間差好幾個數量級，不除的話模型學到的會是「這是不是大型股」。
+CHIP_FEATURE_KEYS = [
     "foreign_net_ratio",
     "foreign_net_ratio_5d",
     "trust_net_ratio",
@@ -61,23 +57,57 @@ FEATURE_KEYS = [
     "margin_change_5d",
 ]
 
+FEATURE_KEYS = (
+    PRICE_FEATURE_KEYS
+    + _KD_FEATURE_KEYS
+    + _VALUATION_FEATURE_KEYS
+    + MARKET_FEATURE_KEYS
+    + _RELATIVE_FEATURE_KEYS
+    + CHIP_FEATURE_KEYS
+)
+
+# 滾動類特徵是「運算子 × 視窗」的組合，標籤跟著組出來就好——手寫 28 個
+# 只會有錯字，而且加一個視窗就要補一整排
+_ROLLING_LABELS: dict[str, str] = {
+    "roc": "近 {w} 日報酬率",
+    "std": "近 {w} 日報酬標準差",
+    "rsqr": "近 {w} 日趨勢直度（R²）",
+    "cntp": "近 {w} 日上漲天數佔比",
+    "vma": "近 {w} 日均量 / 今日量",
+    "volcorr": "近 {w} 日量價相關係數",
+    "rsv": "收盤價在近 {w} 日高低區間的位置",
+}
+
 FEATURE_LABELS: dict[str, str] = {
     "close": "收盤價",
     "volume": "成交量",
-    "volume_ratio_5": "量能比（今日量 / 5日均量）",
     "change_percent": "當日漲跌幅",
+    # K 棒形狀：全部是比例，不同價位的股票才可比
+    "kmid": "K棒 實體 / 開盤價",
+    "klen": "K棒 全幅 / 開盤價",
+    "kmid2": "K棒 實體 / 全幅",
+    "kup": "K棒 上影線 / 開盤價",
+    "kup2": "K棒 上影線 / 全幅",
+    "klow": "K棒 下影線 / 開盤價",
+    "klow2": "K棒 下影線 / 全幅",
+    "ksft": "K棒 收盤偏移 / 開盤價",
+    "ksft2": "K棒 收盤偏移 / 全幅",
+    "open_over_close": "開盤價 / 收盤價",
+    "high_over_close": "最高價 / 收盤價",
+    "low_over_close": "最低價 / 收盤價",
     "ma5_bias": "5日均線乖離率",
     "ma20_bias": "20日均線乖離率",
     "ma60_bias": "60日均線乖離率",
     "ma5_over_ma20": "5日均線 / 20日均線",
     "ma20_over_ma60": "20日均線 / 60日均線",
+    "volume_ratio_5": "量能比（今日量 / 5日均量）",
+    "volatility_20": "近 20 日報酬率標準差",
+    "cumulative_change_5": "近 5 日累積漲跌幅",
+    "cumulative_change_20": "近 20 日累積漲跌幅",
+    "streak_days": "連續漲跌天數（漲為正、跌為負）",
     "k_value": "KD 的 K 值",
     "d_value": "KD 的 D 值",
     "k_minus_d": "K 減 D",
-    "streak_days": "連續漲跌天數（漲為正、跌為負）",
-    "cumulative_change_5": "近 5 日累積漲跌幅",
-    "cumulative_change_20": "近 20 日累積漲跌幅",
-    "volatility_20": "近 20 日報酬率標準差",
     "pe_ratio": "本益比",
     "dividend_yield": "殖利率",
     "pb_ratio": "股價淨值比",
@@ -95,7 +125,23 @@ FEATURE_LABELS: dict[str, str] = {
     "margin_change_5d": "融資餘額近 5 日變化率",
 }
 
-DEFAULT_FEATURES = [
+for _window in WINDOWS:
+    for _name, _template in _ROLLING_LABELS.items():
+        FEATURE_LABELS[f"{_name}_{_window}"] = _template.format(w=_window)
+
+# 清單與標籤必須完全對得上。對不上要在載入時就炸掉，不要等到訓練跑一半、
+# 或前端顯示出一個 key 當標籤才發現
+_missing = [key for key in FEATURE_KEYS if key not in FEATURE_LABELS]
+if _missing:
+    raise RuntimeError(f"這些特徵沒有中文標籤：{_missing}")
+
+# ── 特徵集預設 ────────────────────────────────────────────────────────
+# 71 個勾選框沒辦法用，所以提供幾組現成的。定義放後端一份，前端只負責顯示——
+# 前端自己維護一份清單的話，加了新特徵那邊不會自己跟上。
+
+# 精選：人工挑過、彼此重疊較少的一組。相對強弱與籌碼面預設就在裡面，
+# 因為它們是這個系統最可能帶來訊號的部分
+CURATED_FEATURES = [
     "change_percent",
     "volume_ratio_5",
     "ma5_bias",
@@ -108,36 +154,43 @@ DEFAULT_FEATURES = [
     "volatility_20",
     "pe_ratio",
     "pb_ratio",
-    # 相對強弱預設就勾起來：個股自己的漲跌幅裡混著整個市場的方向，
-    # 減掉大盤之後剩下的才是這檔股票「自己」的表現
+    "market_return_1d",
+    "market_breadth",
     "relative_return_1d",
     "relative_return_20d",
-    # 籌碼面：誰在買、誰在賣。台股外資比重高，法人買賣超是這個市場長期被
-    # 討論最多的訊號之一。一律除以成交量做正規化——原始股數在台積電和小型股
-    # 之間差好幾個數量級，不除的話模型學到的會是「這是不是大型股」。
     "foreign_net_ratio",
     "foreign_net_ratio_5d",
-    "trust_net_ratio",
     "institution_net_ratio",
-    "margin_change_5d",
 ]
 
-# 大盤特徵（每日只算一次、所有股票共用的那幾個）
-MARKET_FEATURE_KEYS = [
-    "market_return_1d",
-    "market_return_5d",
-    "market_return_20d",
-    "market_breadth",
-    "market_ma20_bias",
-]
+# 純價量：不含估值與籌碼面，用來對照「基本面與籌碼面到底有沒有加分」
+PRICE_ONLY_FEATURES = list(PRICE_FEATURE_KEYS) + _KD_FEATURE_KEYS
 
-# 籌碼面特徵（資料缺這幾天時要補 None 的那些）
-CHIP_FEATURE_KEYS = [
-    "foreign_net_ratio",
-    "foreign_net_ratio_5d",
-    "trust_net_ratio",
-    "institution_net_ratio",
-    "margin_change_5d",
+DEFAULT_FEATURES = CURATED_FEATURES
+
+FEATURE_PRESETS: list[dict] = [
+    {
+        "key": "curated",
+        "label": "精選",
+        "description": f"人工挑過、彼此重疊較少的 {len(CURATED_FEATURES)} 項，含相對強弱與籌碼面。",
+        "features": CURATED_FEATURES,
+    },
+    {
+        "key": "alpha_lite",
+        "label": "Alpha158 精簡版",
+        "description": (
+            f"全部 {len(FEATURE_KEYS)} 項，做法參考 Qlib 的 Alpha158（K棒形狀 + 多視窗滾動統計），"
+            "但只取其中相關性較低的一部分。特徵多不等於比較好——樣本數沒變的情況下，"
+            "更容易過擬合，樹模型還撐得住，線性模型會明顯受害。"
+        ),
+        "features": list(FEATURE_KEYS),
+    },
+    {
+        "key": "price_only",
+        "label": "純價量",
+        "description": f"只用價量與技術指標的 {len(PRICE_ONLY_FEATURES)} 項，不含估值、大盤與籌碼面。適合當對照組。",
+        "features": PRICE_ONLY_FEATURES,
+    },
 ]
 
 # 指標要算得準（尤其 MA60）需要的暖身天數；資料不足這個長度的股票不會產生特徵列
@@ -160,179 +213,9 @@ def load_twse_bars(db: Session, start: date, end: date) -> dict[str, list[DailyB
     return dict(bars_by_code)
 
 
-def load_valuations(db: Session, start: date, end: date) -> dict[str, list[tuple[date, float | None, float | None, float | None]]]:
-    """估值快照（本益比/殖利率/淨值比），依股票代碼分組、日期升冪。
-
-    這是月頻（TWSE 回補）或逐日累積的稀疏資料，所以取用時要往前找「最後一筆
-    日期 <= 特徵日」的快照（見 _valuation_as_of），不能直接對齊當天。
-    """
-    rows = (
-        db.query(
-            StockValuationHistory.stock_code,
-            StockValuationHistory.as_of_date,
-            StockValuationHistory.pe_ratio,
-            StockValuationHistory.dividend_yield,
-            StockValuationHistory.pb_ratio,
-        )
-        .filter(StockValuationHistory.as_of_date >= start, StockValuationHistory.as_of_date <= end)
-        .order_by(StockValuationHistory.stock_code.asc(), StockValuationHistory.as_of_date.asc())
-        .all()
-    )
-    by_code: dict[str, list[tuple]] = defaultdict(list)
-    for code, as_of, pe, dy, pb in rows:
-        by_code[code].append((as_of, pe, dy, pb))
-    return dict(by_code)
 
 
-def _valuation_as_of(snapshots: list[tuple], target: date, cursor: int) -> tuple[dict, int]:
-    """從已排序的快照往前推進，回傳「日期 <= target 的最後一筆」。cursor 是上一次
-    停下來的位置，因為呼叫端是依日期遞增逐日跑，這樣整段只會掃過一次。"""
-    while cursor + 1 < len(snapshots) and snapshots[cursor + 1][0] <= target:
-        cursor += 1
-    if cursor < len(snapshots) and snapshots[cursor][0] <= target:
-        _, pe, dy, pb = snapshots[cursor]
-        return {"pe_ratio": pe, "dividend_yield": dy, "pb_ratio": pb}, cursor
-    return {"pe_ratio": None, "dividend_yield": None, "pb_ratio": None}, cursor
 
-
-def _safe_div(a: float | None, b: float | None) -> float | None:
-    if a is None or b is None or b == 0:
-        return None
-    return a / b
-
-
-def compute_feature_row(bars: list[DailyBar], kd_series: list[tuple[float, float]], index: int) -> dict:
-    """算出 bars[index] 這一天的特徵。bars 必須是日期升冪，且 index 之後的資料
-    完全不會被讀到——這是「不看未來」的關鍵，所以視窗一律用 bars[: index + 1]。"""
-    window = bars[: index + 1]
-    today = window[-1]
-
-    ma5 = latest_ma(window, 5)
-    ma20 = latest_ma(window, 20)
-    ma60 = latest_ma(window, 60)
-    k, d = kd_series[index]
-
-    prev_close = window[-2].close if len(window) >= 2 else None
-    change_percent = None
-    if prev_close:
-        change_percent = (today.close - prev_close) / prev_close * 100
-
-    recent_volumes = [b.volume for b in window[-5:]]
-    avg_volume_5 = sum(recent_volumes) / len(recent_volumes) if recent_volumes else None
-
-    # 近 20 日日報酬率的標準差（母體標準差，樣本數固定所以不做修正）
-    volatility_20 = None
-    if len(window) >= 21:
-        returns = []
-        for i in range(len(window) - 20, len(window)):
-            prev = window[i - 1].close
-            if prev:
-                returns.append((window[i].close - prev) / prev)
-        if returns:
-            mean = sum(returns) / len(returns)
-            volatility_20 = (sum((r - mean) ** 2 for r in returns) / len(returns)) ** 0.5 * 100
-
-    direction, days = streak(window)
-    streak_days = days if direction == "up" else (-days if direction == "down" else 0)
-
-    return {
-        "close": today.close,
-        "volume": float(today.volume),
-        "volume_ratio_5": _safe_div(float(today.volume), avg_volume_5),
-        "change_percent": change_percent,
-        "ma5_bias": (today.close - ma5) / ma5 * 100 if ma5 else None,
-        "ma20_bias": (today.close - ma20) / ma20 * 100 if ma20 else None,
-        "ma60_bias": (today.close - ma60) / ma60 * 100 if ma60 else None,
-        "ma5_over_ma20": _safe_div(ma5, ma20),
-        "ma20_over_ma60": _safe_div(ma20, ma60),
-        "k_value": k,
-        "d_value": d,
-        "k_minus_d": k - d,
-        "streak_days": float(streak_days),
-        "cumulative_change_5": cumulative_change_percent(window, 5),
-        "cumulative_change_20": cumulative_change_percent(window, 20),
-        "volatility_20": volatility_20,
-    }
-
-
-def load_chip_data(db: Session, start: date, end: date) -> dict[str, dict[date, dict]]:
-    """籌碼面資料，依股票代碼與日期建索引。"""
-    rows = (
-        db.query(
-            ChipDaily.stock_code,
-            ChipDaily.trade_date,
-            ChipDaily.foreign_net,
-            ChipDaily.trust_net,
-            ChipDaily.institution_net,
-            ChipDaily.margin_balance,
-        )
-        .filter(ChipDaily.trade_date >= start, ChipDaily.trade_date <= end)
-        .all()
-    )
-    by_code: dict[str, dict[date, dict]] = defaultdict(dict)
-    for code, day, foreign, trust, institution, margin in rows:
-        by_code[code][day] = {
-            "foreign_net": foreign,
-            "trust_net": trust,
-            "institution_net": institution,
-            "margin_balance": margin,
-        }
-    return dict(by_code)
-
-
-def _chip_features(bars: list[DailyBar], index: int, chips: dict[date, dict]) -> dict:
-    """算某一天的籌碼面特徵。只看 bars[:index+1]，不碰未來。
-
-    買賣超一律除以成交量：原始股數在台積電（單日上億股）和小型股（幾十萬股）
-    之間差好幾個數量級，直接餵進去的話模型學到的會是「這是不是大型股」，
-    而不是「今天法人動作多大」。除以成交量之後才是跨股票可比的強度。
-    """
-    empty = {key: None for key in CHIP_FEATURE_KEYS}
-    if not chips:
-        return empty
-
-    today = bars[index]
-    chip_today = chips.get(today.trade_date)
-    if not chip_today:
-        return empty
-
-    def ratio(net: int | None) -> float | None:
-        if net is None or not today.volume:
-            return None
-        return net / today.volume * 100
-
-    result = {
-        "foreign_net_ratio": ratio(chip_today.get("foreign_net")),
-        "trust_net_ratio": ratio(chip_today.get("trust_net")),
-        "institution_net_ratio": ratio(chip_today.get("institution_net")),
-        "foreign_net_ratio_5d": None,
-        "margin_change_5d": None,
-    }
-
-    # 近 5 日：買賣超合計除以成交量合計，而不是每天的比率再平均——
-    # 後者會讓成交量很小的那幾天有不成比例的權重
-    window = bars[max(0, index - 4) : index + 1]
-    net_sum = 0
-    volume_sum = 0
-    has_any = False
-    for bar in window:
-        chip = chips.get(bar.trade_date)
-        if chip and chip.get("foreign_net") is not None and bar.volume:
-            net_sum += chip["foreign_net"]
-            volume_sum += bar.volume
-            has_any = True
-    if has_any and volume_sum:
-        result["foreign_net_ratio_5d"] = net_sum / volume_sum * 100
-
-    # 融資餘額的變化率。餘額本身跟股本大小綁在一起、跨股票不可比，變化率才可比
-    if index >= 5:
-        past = chips.get(bars[index - 5].trade_date)
-        current_margin = chip_today.get("margin_balance")
-        past_margin = past.get("margin_balance") if past else None
-        if current_margin is not None and past_margin:
-            result["margin_change_5d"] = (current_margin - past_margin) / past_margin * 100
-
-    return result
 
 
 def build_market_series(bars_by_code: dict[str, list[DailyBar]]) -> dict[date, dict]:
@@ -398,21 +281,6 @@ def market_levels(series: dict[date, dict]) -> dict[date, float]:
     return {day: values["market_level"] for day, values in series.items()}
 
 
-def _relative_features(row: dict, market: dict | None) -> dict:
-    """個股減掉大盤之後的相對強弱。任一邊缺值就給 None，不硬湊。"""
-    if not market:
-        return {"relative_return_1d": None, "relative_return_20d": None}
-
-    def diff(own_key: str, market_key: str) -> float | None:
-        own = row.get(own_key)
-        reference = market.get(market_key)
-        return None if own is None or reference is None else own - reference
-
-    return {
-        "relative_return_1d": diff("change_percent", "market_return_1d"),
-        "relative_return_20d": diff("cumulative_change_20", "market_return_20d"),
-    }
-
 
 def build_feature_rows(
     db: Session,
@@ -425,48 +293,163 @@ def build_feature_rows(
     fetch_start 要比 feature_start 早一段（暖身期），指標才算得出來；早於
     feature_start 的日子只用來暖身，不會產出特徵列。
 
+    整條管線都是向量化的：價量特徵整欄一次算完（price_features），估值用
+    merge_asof 做「取日期不晚於特徵日的最後一筆」的接合，籌碼面用一次 merge，
+    大盤用日期 map。逐列的 Python 迴圈只剩最後把 DataFrame 轉成 dict 那一步。
+
+    KD 是唯一還逐股票算的：它是遞迴平滑，而且跟策略引擎共用同一份實作，
+    改寫成向量化會多出一份可能跟策略那邊不一致的邏輯。
+
     回傳 (特徵列, 原始日K)。每一列是 {stock_code, as_of_date, close, <各項特徵>...}，
     還沒有 label——label 需要「未來」的價格，交給 dataset.attach_labels 用同一份
     日K去算，職責才不會跟「只能看過去」的特徵混在一起。
     """
     bars_by_code = load_twse_bars(db, fetch_start, fetch_end)
-    valuations_by_code = load_valuations(db, fetch_start, fetch_end)
-    # 大盤狀態每個交易日只算一次，所有股票共用同一份
-    market_series = build_market_series(bars_by_code)
-    chips_by_code = load_chip_data(db, fetch_start, fetch_end)
+    # 資料太短的股票連 MA20/KD 都不穩，整檔排除
+    bars_by_code = {c: b for c, b in bars_by_code.items() if len(b) >= MIN_BARS_FOR_FEATURES}
+    if not bars_by_code:
+        return [], {}
 
-    rows: list[dict] = []
-    for code, bars in bars_by_code.items():
-        if len(bars) < MIN_BARS_FOR_FEATURES:
-            continue
+    frame = build_price_frame(bars_by_code)
+    features = compute_price_features(frame)
+    combined = pd.concat([frame[["stock_code", "as_of_date"]], features], axis=1)
 
-        kd_series = compute_kd_series(bars)
-        snapshots = valuations_by_code.get(code, [])
-        chips = chips_by_code.get(code, {})
-        cursor = 0
+    # 暖身期的列到這裡才丟掉——前面要留著，滾動視窗才算得出正確的值
+    position = frame.groupby("stock_code", sort=False).cumcount().to_numpy()
+    keep = (combined["as_of_date"] >= feature_start) & (position + 1 >= MIN_BARS_FOR_FEATURES)
+    combined = combined[keep].reset_index(drop=True)
+    if combined.empty:
+        return [], bars_by_code
 
-        for index, bar in enumerate(bars):
-            if bar.trade_date < feature_start:
-                continue
-            if index + 1 < MIN_BARS_FOR_FEATURES:
-                continue  # 這一天之前的資料還不夠算指標
+    combined = _attach_kd(combined, bars_by_code)
+    combined = _attach_valuations(combined, db, fetch_start, fetch_end)
+    combined = _attach_market(combined, build_market_series(bars_by_code))
+    combined = _attach_chips(combined, db, fetch_start, fetch_end, frame)
 
-            valuation, cursor = _valuation_as_of(snapshots, bar.trade_date, cursor)
-            row = {"stock_code": code, "as_of_date": bar.trade_date}
-            row.update(compute_feature_row(bars, kd_series, index))
-            row.update(valuation)
-            market = market_series.get(bar.trade_date)
-            row.update({key: (market or {}).get(key) for key in MARKET_FEATURE_KEYS})
-            # 相對強弱要在個股特徵算完之後才算得出來（它用到 change_percent）
-            row.update(_relative_features(row, market))
-            row.update(_chip_features(bars, index, chips))
-            rows.append(row)
+    # NaN 要換成 None：下游用 `value is None` 判斷缺值，NaN 會被當成有值
+    combined = combined.astype(object).where(pd.notna(combined), None)
+    rows = combined.to_dict("records")
 
     logger.info(
-        "build_feature_rows: %s~%s 產出 %d 列特徵（涵蓋 %d 檔股票）",
+        "build_feature_rows: %s~%s 產出 %d 列特徵（涵蓋 %d 檔股票、%d 項特徵）",
         feature_start,
         fetch_end,
         len(rows),
         len(bars_by_code),
+        len(FEATURE_KEYS),
     )
     return rows, bars_by_code
+
+
+def _attach_kd(combined: pd.DataFrame, bars_by_code: dict[str, list[DailyBar]]) -> pd.DataFrame:
+    """KD 逐股票算（遞迴平滑），再依 (代號, 日期) 併回來。"""
+    records = []
+    for code, bars in bars_by_code.items():
+        for bar, (k, d) in zip(bars, compute_kd_series(bars)):
+            records.append((code, bar.trade_date, k, d))
+    kd = pd.DataFrame.from_records(records, columns=["stock_code", "as_of_date", "k_value", "d_value"])
+    merged = combined.merge(kd, on=["stock_code", "as_of_date"], how="left")
+    merged["k_minus_d"] = merged["k_value"] - merged["d_value"]
+    return merged
+
+
+def _attach_valuations(combined: pd.DataFrame, db: Session, start: date, end: date) -> pd.DataFrame:
+    """估值快照是月頻的稀疏資料，取「日期不晚於特徵日」的最後一筆。
+
+    merge_asof 的預設方向就是這個語意，而且它強制要求兩邊都依接合鍵排序——
+    這正好也是「不看未來」的保證：它永遠不會往後找。
+    """
+    rows = (
+        db.query(
+            StockValuationHistory.stock_code,
+            StockValuationHistory.as_of_date,
+            StockValuationHistory.pe_ratio,
+            StockValuationHistory.dividend_yield,
+            StockValuationHistory.pb_ratio,
+        )
+        .filter(StockValuationHistory.as_of_date >= start, StockValuationHistory.as_of_date <= end)
+        .all()
+    )
+    columns = ["stock_code", "as_of_date", "pe_ratio", "dividend_yield", "pb_ratio"]
+    if not rows:
+        for column in columns[2:]:
+            combined[column] = None
+        return combined
+
+    valuations = pd.DataFrame.from_records(list(rows), columns=columns)
+    valuations["as_of_date"] = pd.to_datetime(valuations["as_of_date"])
+    valuations.sort_values(["as_of_date", "stock_code"], inplace=True)
+
+    left = combined.copy()
+    left["as_of_date"] = pd.to_datetime(left["as_of_date"])
+    left.sort_values(["as_of_date", "stock_code"], inplace=True)
+
+    merged = pd.merge_asof(left, valuations, on="as_of_date", by="stock_code", direction="backward")
+    merged["as_of_date"] = merged["as_of_date"].dt.date
+    return merged.sort_values(["stock_code", "as_of_date"]).reset_index(drop=True)
+
+
+def _attach_market(combined: pd.DataFrame, market_series: dict[date, dict]) -> pd.DataFrame:
+    """大盤狀態每個交易日只有一份，依日期 map 過去即可。"""
+    for key in MARKET_FEATURE_KEYS:
+        lookup = {day: values.get(key) for day, values in market_series.items()}
+        combined[key] = combined["as_of_date"].map(lookup)
+
+    # 相對強弱要等個股特徵算完才算得出來
+    combined["relative_return_1d"] = combined["change_percent"] - combined["market_return_1d"]
+    combined["relative_return_20d"] = combined["cumulative_change_20"] - combined["market_return_20d"]
+    return combined
+
+
+def _attach_chips(
+    combined: pd.DataFrame, db: Session, start: date, end: date, frame: pd.DataFrame
+) -> pd.DataFrame:
+    """籌碼面特徵。買賣超一律除以成交量——原始股數在台積電（單日上億股）和
+    小型股（幾十萬股）之間差好幾個數量級，不除的話模型學到的會是「這是不是
+    大型股」，而不是「今天法人動作多大」。"""
+    rows = (
+        db.query(
+            ChipDaily.stock_code,
+            ChipDaily.trade_date,
+            ChipDaily.foreign_net,
+            ChipDaily.trust_net,
+            ChipDaily.institution_net,
+            ChipDaily.margin_balance,
+        )
+        .filter(ChipDaily.trade_date >= start, ChipDaily.trade_date <= end)
+        .all()
+    )
+    if not rows:
+        for key in CHIP_FEATURE_KEYS:
+            combined[key] = None
+        return combined
+
+    chips = pd.DataFrame.from_records(
+        list(rows),
+        columns=["stock_code", "as_of_date", "foreign_net", "trust_net", "institution_net", "margin_balance"],
+    )
+
+    # 先在「完整的日K」上算滾動量，再併到已經濾過暖身期的 combined——
+    # 反過來的話近 5 日的視窗會在切點處算錯
+    base = frame[["stock_code", "as_of_date", "volume"]].merge(
+        chips, on=["stock_code", "as_of_date"], how="left"
+    )
+    grouped = base.groupby("stock_code", sort=False)
+    position = grouped.cumcount().to_numpy()
+
+    net_5d = base["foreign_net"].rolling(5).sum().where(position >= 4)
+    volume_5d = base["volume"].where(base["foreign_net"].notna()).rolling(5).sum().where(position >= 4)
+    margin_past = grouped["margin_balance"].shift(5)
+
+    derived = pd.DataFrame({"stock_code": base["stock_code"], "as_of_date": base["as_of_date"]})
+    volume_safe = base["volume"].replace(0, np.nan)
+    derived["foreign_net_ratio"] = base["foreign_net"] / volume_safe * 100
+    derived["trust_net_ratio"] = base["trust_net"] / volume_safe * 100
+    derived["institution_net_ratio"] = base["institution_net"] / volume_safe * 100
+    derived["foreign_net_ratio_5d"] = net_5d / volume_5d.replace(0, np.nan) * 100
+    derived["margin_change_5d"] = (
+        (base["margin_balance"] - margin_past) / margin_past.replace(0, np.nan) * 100
+    ).where(position >= 5)
+    derived.replace([np.inf, -np.inf], np.nan, inplace=True)
+
+    return combined.merge(derived, on=["stock_code", "as_of_date"], how="left")
