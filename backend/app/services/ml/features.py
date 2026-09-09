@@ -41,6 +41,16 @@ FEATURE_KEYS = [
     "pe_ratio",
     "dividend_yield",
     "pb_ratio",
+    # 大盤（全市場）特徵：讓模型看得到「今天整個市場是什麼狀況」。
+    # 少了這些，「這檔今天漲 3%」在大盤漲 2% 和跌 2% 的日子對模型是同一件事。
+    "market_return_1d",
+    "market_return_5d",
+    "market_return_20d",
+    "market_breadth",
+    "market_ma20_bias",
+    # 個股相對大盤的強弱——把市場方向這個最大的共同雜訊源減掉之後剩下的部分
+    "relative_return_1d",
+    "relative_return_20d",
 ]
 
 FEATURE_LABELS: dict[str, str] = {
@@ -63,6 +73,13 @@ FEATURE_LABELS: dict[str, str] = {
     "pe_ratio": "本益比",
     "dividend_yield": "殖利率",
     "pb_ratio": "股價淨值比",
+    "market_return_1d": "大盤當日漲跌幅",
+    "market_return_5d": "大盤近 5 日漲跌幅",
+    "market_return_20d": "大盤近 20 日漲跌幅",
+    "market_breadth": "市場寬度（當日上漲家數佔比 %）",
+    "market_ma20_bias": "大盤 20 日均線乖離率",
+    "relative_return_1d": "相對大盤強弱（當日）",
+    "relative_return_20d": "相對大盤強弱（近 20 日）",
 }
 
 DEFAULT_FEATURES = [
@@ -78,6 +95,23 @@ DEFAULT_FEATURES = [
     "volatility_20",
     "pe_ratio",
     "pb_ratio",
+    # 相對強弱預設就勾起來：個股自己的漲跌幅裡混著整個市場的方向，
+    # 減掉大盤之後剩下的才是這檔股票「自己」的表現
+    "relative_return_1d",
+    "relative_return_20d",
+]
+
+# 只丟收盤價的「不指定特徵」模式用的特徵組合。留一個具名常數而不是讓前端
+# 自己湊 ["close"]，是為了讓「這個模式代表什麼」只有後端一份定義。
+RAW_CLOSE_ONLY_FEATURES = ["close"]
+
+# 大盤特徵（每日只算一次、所有股票共用的那幾個）
+MARKET_FEATURE_KEYS = [
+    "market_return_1d",
+    "market_return_5d",
+    "market_return_20d",
+    "market_breadth",
+    "market_ma20_bias",
 ]
 
 # 指標要算得準（尤其 MA60）需要的暖身天數；資料不足這個長度的股票不會產生特徵列
@@ -195,6 +229,77 @@ def compute_feature_row(bars: list[DailyBar], kd_series: list[tuple[float, float
     }
 
 
+def build_market_series(bars_by_code: dict[str, list[DailyBar]]) -> dict[date, dict]:
+    """從全市場的日K算出每個交易日的大盤狀態。
+
+    刻意**不**去抓大盤指數（TAIEX）：那要多一個外部資料來源、多一條回補管線，
+    而我們手上本來就有全市場每一檔的日K，等權平均出來的市場報酬已經是很好的
+    代理，而且跟個股特徵完全同源、同一天一定都有資料。
+
+    等權（每檔股票一票）而不是市值加權，是刻意的選擇：市值加權會被少數幾檔
+    權值股主導，而這個系統是全市場等權選股，等權的大盤才是它真正的比較基準。
+
+    每個日期只用「當天及之前」的資料，跟其他特徵一樣不看未來。
+    """
+    daily_returns: dict[date, list[float]] = defaultdict(list)
+    for bars in bars_by_code.values():
+        for i in range(1, len(bars)):
+            previous_close = bars[i - 1].close
+            if previous_close:
+                daily_returns[bars[i].trade_date].append((bars[i].close - previous_close) / previous_close * 100)
+
+    series: dict[date, dict] = {}
+    level = 100.0          # 合成的大盤指數，起點設 100 只是為了好讀
+    levels: list[float] = []
+    trading_days = sorted(daily_returns.keys())
+
+    for i, day in enumerate(trading_days):
+        returns = daily_returns[day]
+        if not returns:
+            continue
+        market_return = sum(returns) / len(returns)
+        breadth = sum(1 for r in returns if r > 0) / len(returns) * 100
+
+        level *= 1 + market_return / 100
+        levels.append(level)
+
+        def change_over(window: int) -> float | None:
+            """往回 window 個交易日的累積漲跌幅，不足就回 None。"""
+            if len(levels) <= window:
+                return None
+            past = levels[-window - 1]
+            return (level - past) / past * 100 if past else None
+
+        ma20 = sum(levels[-20:]) / 20 if len(levels) >= 20 else None
+
+        series[day] = {
+            "market_return_1d": market_return,
+            "market_return_5d": change_over(5),
+            "market_return_20d": change_over(20),
+            "market_breadth": breadth,
+            "market_ma20_bias": (level - ma20) / ma20 * 100 if ma20 else None,
+        }
+
+    logger.info("build_market_series: %d 個交易日的大盤狀態", len(series))
+    return series
+
+
+def _relative_features(row: dict, market: dict | None) -> dict:
+    """個股減掉大盤之後的相對強弱。任一邊缺值就給 None，不硬湊。"""
+    if not market:
+        return {"relative_return_1d": None, "relative_return_20d": None}
+
+    def diff(own_key: str, market_key: str) -> float | None:
+        own = row.get(own_key)
+        reference = market.get(market_key)
+        return None if own is None or reference is None else own - reference
+
+    return {
+        "relative_return_1d": diff("change_percent", "market_return_1d"),
+        "relative_return_20d": diff("cumulative_change_20", "market_return_20d"),
+    }
+
+
 def build_feature_rows(
     db: Session,
     fetch_start: date,
@@ -212,6 +317,8 @@ def build_feature_rows(
     """
     bars_by_code = load_twse_bars(db, fetch_start, fetch_end)
     valuations_by_code = load_valuations(db, fetch_start, fetch_end)
+    # 大盤狀態每個交易日只算一次，所有股票共用同一份
+    market_series = build_market_series(bars_by_code)
 
     rows: list[dict] = []
     for code, bars in bars_by_code.items():
@@ -232,6 +339,10 @@ def build_feature_rows(
             row = {"stock_code": code, "as_of_date": bar.trade_date}
             row.update(compute_feature_row(bars, kd_series, index))
             row.update(valuation)
+            market = market_series.get(bar.trade_date)
+            row.update(market or {key: None for key in MARKET_FEATURE_KEYS})
+            # 相對強弱要在個股特徵算完之後才算得出來（它用到 change_percent）
+            row.update(_relative_features(row, market))
             rows.append(row)
 
     logger.info(

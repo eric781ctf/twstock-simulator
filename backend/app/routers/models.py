@@ -24,7 +24,12 @@ from app.schemas import (
 )
 from app.services.auth import require_admin
 from app.services.ml import artifacts
-from app.services.ml.features import DEFAULT_FEATURES, FEATURE_KEYS, FEATURE_LABELS
+from app.services.ml.features import (
+    DEFAULT_FEATURES,
+    FEATURE_KEYS,
+    FEATURE_LABELS,
+    RAW_CLOSE_ONLY_FEATURES,
+)
 from app.services.ml.inference import latest_bar_date
 from app.services.ml.performance import summarize_holdings
 from app.services.ml.train import (
@@ -50,6 +55,7 @@ def get_train_defaults(db: Session = Depends(get_db), _: User = Depends(require_
         latest_data_date=latest,
         **suggest_split_dates(latest),
         default_features=DEFAULT_FEATURES,
+        raw_close_only_features=RAW_CLOSE_ONLY_FEATURES,
         features=[FeatureOptionOut(key=key, label=FEATURE_LABELS[key]) for key in FEATURE_KEYS],
         model_types=[
             ModelTypeOptionOut(

@@ -76,6 +76,7 @@ export default function AdminModelsPage() {
   const [family, setFamily] = useState("");
   const [modelType, setModelType] = useState<ModelType>("lightgbm");
   const [features, setFeatures] = useState<string[]>([]);
+  const [rawCloseOnly, setRawCloseOnly] = useState(false);
   const [nDays, setNDays] = useState("5");
   const [threshold, setThreshold] = useState("3");
   const [returnWeight, setReturnWeight] = useState("0.5");
@@ -141,6 +142,13 @@ export default function AdminModelsPage() {
 
   function toggleFeature(key: string) {
     setFeatures((prev) => (prev.includes(key) ? prev.filter((f) => f !== key) : [...prev, key]));
+  }
+
+  /** 切到「不指定特徵」時換成後端定義的那組；切回來則回到後端給的預設勾選。 */
+  function toggleRawCloseOnly(enabled: boolean) {
+    setRawCloseOnly(enabled);
+    if (!defaults) return;
+    setFeatures(enabled ? defaults.raw_close_only_features : defaults.default_features);
   }
 
   function optionalNumber(value: string): number | null {
@@ -414,11 +422,33 @@ export default function AdminModelsPage() {
             <Link to="/model-tutorial#score-formula">模型教學</Link>。
           </p>
 
-          <h3 className="tutorial-heading">訓練特徵（已勾選 {features.length} 項）</h3>
-          <div className="feature-checkbox-grid">
+          <h3 className="tutorial-heading">
+            訓練特徵{rawCloseOnly ? "（不指定，只用收盤價）" : `（已勾選 ${features.length} 項）`}
+          </h3>
+
+          <label className={rawCloseOnly ? "feature-checkbox active raw-only-toggle" : "feature-checkbox raw-only-toggle"}>
+            <input type="checkbox" checked={rawCloseOnly} onChange={(e) => toggleRawCloseOnly(e.target.checked)} />
+            不指定特徵，只丟每日收盤價
+          </label>
+          <p className="order-hint">
+            勾起來就<b>完全不做特徵工程</b>，只把收盤價餵給模型，其他指標一律不算。
+            這是用來當對照組的：如果它跟精心挑選特徵的版本差不多，就代表那些特徵其實沒帶來什麼資訊。
+          </p>
+          <p className="order-hint warn">
+            但要有心理準備：收盤價的<b>絕對數值在不同股票之間不可比</b>（1000 元的台積電和 20 元的雞蛋水餃股，
+            價格高低本身跟接下來會漲會跌沒有關係），所以對 XGBoost、MLP 這種「一列一個樣本」的模型，
+            這幾乎注定接近亂猜。比較有機會的是 GRU / LSTM——它看的是連續 N 天的價格<b>形狀</b>，那才帶有資訊。
+          </p>
+
+          <div className={rawCloseOnly ? "feature-checkbox-grid disabled" : "feature-checkbox-grid"}>
             {defaults.features.map((f) => (
               <label key={f.key} className={features.includes(f.key) ? "feature-checkbox active" : "feature-checkbox"}>
-                <input type="checkbox" checked={features.includes(f.key)} onChange={() => toggleFeature(f.key)} />
+                <input
+                  type="checkbox"
+                  checked={features.includes(f.key)}
+                  disabled={rawCloseOnly}
+                  onChange={() => toggleFeature(f.key)}
+                />
                 {f.label}
               </label>
             ))}
