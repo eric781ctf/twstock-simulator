@@ -2233,3 +2233,14 @@ tbody tr:hover {
   background: rgba(255, 255, 255, 0.03);
   color: var(--muted);
 }
+
+/* 模型列表：同一格裡的多個操作連結 */
+.model-row-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+.cancel-link.danger-link {
+  color: var(--sell);
+}
