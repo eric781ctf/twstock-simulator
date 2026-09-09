@@ -92,7 +92,6 @@ FEATURE_LABELS: dict[str, str] = {
     "klow2": "K棒 下影線 / 全幅",
     "ksft": "K棒 收盤偏移 / 開盤價",
     "ksft2": "K棒 收盤偏移 / 全幅",
-    "open_over_close": "開盤價 / 收盤價",
     "high_over_close": "最高價 / 收盤價",
     "low_over_close": "最低價 / 收盤價",
     "ma5_bias": "5日均線乖離率",
@@ -101,9 +100,6 @@ FEATURE_LABELS: dict[str, str] = {
     "ma5_over_ma20": "5日均線 / 20日均線",
     "ma20_over_ma60": "20日均線 / 60日均線",
     "volume_ratio_5": "量能比（今日量 / 5日均量）",
-    "volatility_20": "近 20 日報酬率標準差",
-    "cumulative_change_5": "近 5 日累積漲跌幅",
-    "cumulative_change_20": "近 20 日累積漲跌幅",
     "streak_days": "連續漲跌天數（漲為正、跌為負）",
     "k_value": "KD 的 K 值",
     "d_value": "KD 的 D 值",
@@ -150,8 +146,8 @@ CURATED_FEATURES = [
     "k_value",
     "d_value",
     "k_minus_d",
-    "cumulative_change_5",
-    "volatility_20",
+    "roc_5",
+    "std_20",
     "pe_ratio",
     "pb_ratio",
     "market_return_1d",
@@ -397,7 +393,8 @@ def _attach_market(combined: pd.DataFrame, market_series: dict[date, dict]) -> p
 
     # 相對強弱要等個股特徵算完才算得出來
     combined["relative_return_1d"] = combined["change_percent"] - combined["market_return_1d"]
-    combined["relative_return_20d"] = combined["cumulative_change_20"] - combined["market_return_20d"]
+    # roc_20 就是原本的 cumulative_change_20（同一個算式），移除重複後改用這個
+    combined["relative_return_20d"] = combined["roc_20"] - combined["market_return_20d"]
     return combined
 
 

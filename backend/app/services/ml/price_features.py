@@ -91,7 +91,8 @@ def compute_price_features(frame: pd.DataFrame) -> pd.DataFrame:
     out["ksft2"] = (2 * close - high - low) / full_range
 
     # ── 當日價格結構（除以收盤價正規化）───────────────────────────
-    out["open_over_close"] = _safe_div(open_, close)
+    # open_over_close 不放：它跟 kmid 的相關係數是 -0.998（kmid = (收-開)/開，
+    # 兩者其實在講同一件事），留一個就好
     out["high_over_close"] = _safe_div(high, close)
     out["low_over_close"] = _safe_div(low, close)
 
@@ -140,10 +141,10 @@ def compute_price_features(frame: pd.DataFrame) -> pd.DataFrame:
     avg_volume_5 = volume.rolling(5).mean().where(position >= 4)
     out["volume_ratio_5"] = _safe_div(volume, avg_volume_5)
 
-    out["volatility_20"] = (daily_return.rolling(20).std() * 100).where(position >= 20)
-    for days in (5, 20):
-        base = grouped["close"].shift(days)
-        out[f"cumulative_change_{days}"] = (_safe_div(close - base, base) * 100).where(position >= days)
+    # volatility_20 / cumulative_change_5 / cumulative_change_20 已經移除：
+    # 它們跟 std_20 / roc_5 / roc_20 是逐點完全相同的值（實測 56,539 個點全部
+    # 相符）。留著兩份不只是浪費計算——樹模型會把重要性拆散到兩個欄位上，
+    # 讓「模型倚重什麼」的解讀失真；線性模型則會直接碰到完全共線。
 
     out["streak_days"] = _streak_days(frame, daily_return)
 
@@ -169,8 +170,8 @@ def _streak_days(frame: pd.DataFrame, daily_return: pd.Series) -> pd.Series:
 PRICE_FEATURE_KEYS: list[str] = (
     ["close", "volume", "change_percent"]
     + ["kmid", "klen", "kmid2", "kup", "kup2", "klow", "klow2", "ksft", "ksft2"]
-    + ["open_over_close", "high_over_close", "low_over_close"]
+    + ["high_over_close", "low_over_close"]
     + [f"{name}_{w}" for w in WINDOWS for name in ("roc", "std", "rsqr", "cntp", "vma", "volcorr", "rsv")]
     + ["ma5_bias", "ma20_bias", "ma60_bias", "ma5_over_ma20", "ma20_over_ma60"]
-    + ["volume_ratio_5", "volatility_20", "cumulative_change_5", "cumulative_change_20", "streak_days"]
+    + ["volume_ratio_5", "streak_days"]
 )
