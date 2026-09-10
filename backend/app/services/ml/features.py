@@ -55,6 +55,10 @@ CHIP_FEATURE_KEYS = [
     "trust_net_ratio",
     "institution_net_ratio",
     "margin_change_5d",
+    # 存量：外資手上目前有多少，以及最近 20 天增減了多少。跟買賣超（流量）
+    # 互補——單日買超很大但持股比率仍然很低，跟持股本來就高的意義完全不同
+    "foreign_holding_ratio",
+    "foreign_holding_change_20d",
 ]
 
 FEATURE_KEYS = (
@@ -117,6 +121,8 @@ FEATURE_LABELS: dict[str, str] = {
     "trust_net_ratio": "投信買賣超 / 成交量",
     "institution_net_ratio": "三大法人買賣超 / 成交量",
     "margin_change_5d": "融資餘額近 5 日變化率",
+    "foreign_holding_ratio": "外資持股比率（%）",
+    "foreign_holding_change_20d": "外資持股比率近 20 日增減（百分點）",
 }
 
 for _window in WINDOWS:
@@ -410,6 +416,7 @@ def _attach_chips(
             ChipDaily.trust_net,
             ChipDaily.institution_net,
             ChipDaily.margin_balance,
+            ChipDaily.foreign_holding_ratio,
         )
         .filter(ChipDaily.trade_date >= start, ChipDaily.trade_date <= end)
         .all()
@@ -421,7 +428,15 @@ def _attach_chips(
 
     chips = pd.DataFrame.from_records(
         list(rows),
-        columns=["stock_code", "as_of_date", "foreign_net", "trust_net", "institution_net", "margin_balance"],
+        columns=[
+            "stock_code",
+            "as_of_date",
+            "foreign_net",
+            "trust_net",
+            "institution_net",
+            "margin_balance",
+            "foreign_holding_ratio",
+        ],
     )
 
     # 先在「完整的日K」上算滾動量，再併到已經濾過暖身期的 combined——
@@ -445,6 +460,14 @@ def _attach_chips(
     derived["margin_change_5d"] = (
         (base["margin_balance"] - margin_past) / margin_past.replace(0, np.nan) * 100
     ).where(position >= 5)
+
+    # 持股比率本身就是百分比、跨股票可比，不用再除以成交量。增減取相減而不是
+    # 相除——從 1% 變 2% 跟從 40% 變 80% 都是「翻倍」，但意義天差地遠
+    derived["foreign_holding_ratio"] = base["foreign_holding_ratio"]
+    holding_past = grouped["foreign_holding_ratio"].shift(20)
+    derived["foreign_holding_change_20d"] = (base["foreign_holding_ratio"] - holding_past).where(
+        position >= 20
+    )
     derived.replace([np.inf, -np.inf], np.nan, inplace=True)
 
     return combined.merge(derived, on=["stock_code", "as_of_date"], how="left")

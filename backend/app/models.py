@@ -351,6 +351,10 @@ class ChipDaily(Base):
     margin_balance: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     short_balance: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
+    # 外資持股比率（%）。跟買賣超是不同性質的東西：買賣超是「今天流入多少」，
+    # 持股比率是「累積下來外資手上有多少」——存量與流量互補
+    foreign_holding_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
+
 
 class ModelScoringRun(Base):
     """每個模型每一天跑選股/出場判斷的執行紀錄，主要是為了記錄耗時，順便當成
