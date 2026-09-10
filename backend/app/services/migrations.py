@@ -27,4 +27,11 @@ def run_lightweight_migrations(engine: Engine) -> None:
         conn.execute(text("ALTER TABLE daily_bars ALTER COLUMN volume TYPE BIGINT"))
         conn.execute(text("ALTER TABLE prediction_models ADD COLUMN IF NOT EXISTS network_config JSON"))
         conn.execute(text("ALTER TABLE prediction_models ADD COLUMN IF NOT EXISTS training_progress JSON"))
+        conn.execute(text("ALTER TABLE prediction_models ADD COLUMN IF NOT EXISTS tree_config JSON"))
+        conn.execute(
+            text(
+                "ALTER TABLE prediction_models ADD COLUMN IF NOT EXISTS "
+                "label_mode VARCHAR(20) NOT NULL DEFAULT 'absolute'"
+            )
+        )
     logger.info("run_lightweight_migrations 完成")

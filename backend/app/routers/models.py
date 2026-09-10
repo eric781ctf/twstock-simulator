@@ -15,6 +15,7 @@ from app.database import get_db
 from app.models import ModelHolding, ModelPrediction, ModelScoringRun, PredictionModel, User
 from app.schemas import (
     FeatureOptionOut,
+    FeaturePresetOut,
     ModelDeleteResultOut,
     ModelSummaryOut,
     ModelTrainRequest,
@@ -24,7 +25,8 @@ from app.schemas import (
 )
 from app.services.auth import require_admin
 from app.services.ml import artifacts
-from app.services.ml.features import DEFAULT_FEATURES, FEATURE_KEYS, FEATURE_LABELS
+from app.services.ml.dataset import LABEL_MODE_LABELS
+from app.services.ml.features import DEFAULT_FEATURES, FEATURE_KEYS, FEATURE_LABELS, FEATURE_PRESETS
 from app.services.ml.inference import latest_bar_date
 from app.services.ml.performance import summarize_holdings
 from app.services.ml.train import (
@@ -32,6 +34,7 @@ from app.services.ml.train import (
     MODEL_TYPES,
     NEURAL_MODEL_TYPES,
     SEQUENCE_MODEL_TYPES,
+    TREE_MODEL_TYPES,
     SCORE_FORMULA_INFO,
     SCORE_FORMULA_KEY,
 )
@@ -50,6 +53,7 @@ def get_train_defaults(db: Session = Depends(get_db), _: User = Depends(require_
         latest_data_date=latest,
         **suggest_split_dates(latest),
         default_features=DEFAULT_FEATURES,
+        feature_presets=[FeaturePresetOut(**preset) for preset in FEATURE_PRESETS],
         features=[FeatureOptionOut(key=key, label=FEATURE_LABELS[key]) for key in FEATURE_KEYS],
         model_types=[
             ModelTypeOptionOut(
@@ -57,6 +61,8 @@ def get_train_defaults(db: Session = Depends(get_db), _: User = Depends(require_
                 label=MODEL_TYPE_LABELS[key],
                 is_neural=key in NEURAL_MODEL_TYPES,
                 is_sequence=key in SEQUENCE_MODEL_TYPES,
+                is_tree=key in TREE_MODEL_TYPES,
+                has_learning_rate=key != "random_forest",
             )
             for key in MODEL_TYPES
         ],
@@ -74,6 +80,8 @@ def _to_summary(model: PredictionModel, stats: dict) -> ModelSummaryOut:
         is_archived=model.is_archived,
         n_days=model.n_days,
         threshold_percent=model.threshold_percent,
+        label_mode=model.label_mode,
+        label_mode_label=LABEL_MODE_LABELS.get(model.label_mode, model.label_mode),
         score_formula=model.score_formula,
         training_duration_seconds=model.training_duration_seconds,
         training_progress=model.training_progress,
@@ -120,9 +128,11 @@ async def create_model(
         feature_config=payload.feature_config,
         n_days=payload.n_days,
         threshold_percent=payload.threshold_percent,
+        label_mode=payload.label_mode,
         score_formula=SCORE_FORMULA_KEY,
         score_weights=payload.score_weights,
         network_config=payload.network_config.model_dump() if payload.network_config else None,
+        tree_config=payload.tree_config.model_dump() if payload.tree_config else None,
         min_hold_days=payload.min_hold_days,
         max_hold_days=payload.max_hold_days,
         stop_loss_percent=payload.stop_loss_percent,

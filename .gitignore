@@ -11,3 +11,8 @@ dist/
 .DS_Store
 
 backend/model_artifacts/
+
+# 臨時驗證腳本。docker compose cp 會寫進掛載的 ./backend，容器內刪掉不一定成功
+# （Git Bash 會把 /app/... 轉成 Windows 路徑，rm 就靜默失敗），所以這裡設一道防線。
+backend/*_tmp.py
+backend/probe*.py

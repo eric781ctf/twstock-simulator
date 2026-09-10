@@ -153,7 +153,18 @@ def _train_sync(model_id: int) -> dict:
 
             index_feature_rows(rows, feature_keys)
 
-        labeled = attach_labels(rows, bars_by_code, model.n_days, model.threshold_percent)
+        # 超額報酬要用大盤水位，跟特徵那邊算的是同一份等權合成指數
+        from app.services.ml.features import build_market_series, market_levels
+
+        levels = market_levels(build_market_series(bars_by_code)) if model.label_mode == "excess" else None
+        labeled = attach_labels(
+            rows,
+            bars_by_code,
+            model.n_days,
+            model.threshold_percent,
+            label_mode=model.label_mode,
+            market_levels=levels,
+        )
         if not labeled:
             raise ValueError("這段期間沒有足夠的本地日K資料可以組出訓練樣本，請先回補更多歷史或調整日期區間")
 
@@ -204,6 +215,7 @@ def _train_sync(model_id: int) -> dict:
             y_validation_reg,
             y_validation_clf,
             network_config=model.network_config,
+            tree_config=model.tree_config,
             on_epoch_end=lambda info: progress("training", info),
         )
 

@@ -5,6 +5,7 @@ import { ConditionEditor } from "../components/ConditionEditor";
 import { useAuth } from "../auth/AuthContext";
 import type {
   Activation,
+  LabelMode,
   Condition,
   ModelSummary,
   ModelTrainRequest,
@@ -76,8 +77,10 @@ export default function AdminModelsPage() {
   const [family, setFamily] = useState("");
   const [modelType, setModelType] = useState<ModelType>("lightgbm");
   const [features, setFeatures] = useState<string[]>([]);
+  const [presetKey, setPresetKey] = useState("curated");
   const [nDays, setNDays] = useState("5");
   const [threshold, setThreshold] = useState("3");
+  const [labelMode, setLabelMode] = useState<LabelMode>("excess");
   const [returnWeight, setReturnWeight] = useState("0.5");
   const [probabilityWeight, setProbabilityWeight] = useState("0.5");
   const [minHold, setMinHold] = useState("2");
@@ -93,6 +96,12 @@ export default function AdminModelsPage() {
   const [sequenceLength, setSequenceLength] = useState("20");
   const [patience, setPatience] = useState("10");
   const [batchSize, setBatchSize] = useState("512");
+  const [nEstimators, setNEstimators] = useState("300");
+  const [treeDepth, setTreeDepth] = useState("6");
+  const [treeLearningRate, setTreeLearningRate] = useState("0.05");
+  const [subsample, setSubsample] = useState("0.8");
+  const [colsample, setColsample] = useState("0.8");
+  const [minChildSamples, setMinChildSamples] = useState("20");
   const [dates, setDates] = useState({
     train_start: "",
     train_end: "",
@@ -141,6 +150,15 @@ export default function AdminModelsPage() {
 
   function toggleFeature(key: string) {
     setFeatures((prev) => (prev.includes(key) ? prev.filter((f) => f !== key) : [...prev, key]));
+    // 手動動過就不再是任何一個預設集了。不改成「自訂」的話，畫面會宣稱還在
+    // 「精選」但送出的清單其實已經不一樣
+    setPresetKey("custom");
+  }
+
+  function applyPreset(key: string) {
+    setPresetKey(key);
+    const preset = defaults?.feature_presets.find((p) => p.key === key);
+    if (preset) setFeatures(preset.features);
   }
 
   function optionalNumber(value: string): number | null {
@@ -172,6 +190,7 @@ export default function AdminModelsPage() {
       feature_config: features,
       n_days: Number(nDays),
       threshold_percent: Number(threshold),
+      label_mode: labelMode,
       score_weights: { return: Number(returnWeight), probability: Number(probabilityWeight) },
       network_config: isNeural
         ? {
@@ -183,6 +202,16 @@ export default function AdminModelsPage() {
             sequence_length: Number(sequenceLength),
             patience: Number(patience),
             batch_size: Number(batchSize),
+          }
+        : null,
+      tree_config: isTree
+        ? {
+            n_estimators: Number(nEstimators),
+            max_depth: Number(treeDepth),
+            learning_rate: Number(treeLearningRate),
+            subsample: Number(subsample),
+            colsample: Number(colsample),
+            min_child_samples: Number(minChildSamples),
           }
         : null,
       min_hold_days: optionalNumber(minHold),
@@ -246,6 +275,8 @@ export default function AdminModelsPage() {
   const selectedType = defaults?.model_types.find((t) => t.key === modelType);
   const isNeural = selectedType?.is_neural ?? false;
   const isSequence = selectedType?.is_sequence ?? false;
+  const isTree = selectedType?.is_tree ?? false;
+  const hasLearningRate = selectedType?.has_learning_rate ?? true;
   const parsedHiddenSizes = hiddenSizes
     .split(/[,\s]+/)
     .map((v) => Number(v.trim()))
@@ -290,6 +321,13 @@ export default function AdminModelsPage() {
               <input type="number" min={1} max={60} value={nDays} onChange={(e) => setNDays(e.target.value)} />
             </label>
             <label>
+              預測目標
+              <select value={labelMode} onChange={(e) => setLabelMode(e.target.value as LabelMode)}>
+                <option value="excess">超額報酬（減掉大盤）</option>
+                <option value="absolute">絕對報酬</option>
+              </select>
+            </label>
+            <label>
               報酬率門檻（%）
               <input type="number" step="0.1" value={threshold} onChange={(e) => setThreshold(e.target.value)} />
             </label>
@@ -307,6 +345,84 @@ export default function AdminModelsPage() {
               />
             </label>
           </div>
+
+          {isTree && (
+            <>
+              <h3 className="tutorial-heading">樹模型參數</h3>
+              <p className="order-hint">
+                這幾個名稱是通用的，後端會翻譯成各套件自己的參數名（例如「葉節點最少樣本數」在
+                XGBoost 是 min_child_weight、在 LightGBM 是 min_child_samples、在 Random Forest 是
+                min_samples_leaf）。
+              </p>
+              <div className="strategy-form-grid">
+                <label>
+                  n_estimators
+                  <input
+                    type="number"
+                    min={10}
+                    max={5000}
+                    value={nEstimators}
+                    onChange={(e) => setNEstimators(e.target.value)}
+                  />
+                </label>
+                <label>
+                  max_depth
+                  <input type="number" min={1} max={32} value={treeDepth} onChange={(e) => setTreeDepth(e.target.value)} />
+                </label>
+                <label>
+                  learning_rate
+                  <input
+                    type="number"
+                    step="0.01"
+                    min={0.001}
+                    max={1}
+                    value={hasLearningRate ? treeLearningRate : ""}
+                    disabled={!hasLearningRate}
+                    placeholder={hasLearningRate ? "" : "此模型沒有學習率"}
+                    onChange={(e) => setTreeLearningRate(e.target.value)}
+                  />
+                </label>
+                <label>
+                  subsample
+                  <input
+                    type="number"
+                    step="0.05"
+                    min={0.1}
+                    max={1}
+                    value={subsample}
+                    onChange={(e) => setSubsample(e.target.value)}
+                  />
+                </label>
+                <label>
+                  colsample
+                  <input
+                    type="number"
+                    step="0.05"
+                    min={0.1}
+                    max={1}
+                    value={colsample}
+                    onChange={(e) => setColsample(e.target.value)}
+                  />
+                </label>
+                <label>
+                  min_child_samples
+                  <input
+                    type="number"
+                    min={1}
+                    max={10000}
+                    value={minChildSamples}
+                    onChange={(e) => setMinChildSamples(e.target.value)}
+                  />
+                </label>
+              </div>
+              <p className="order-hint">
+                <b>train 分數遠高於 test 時，這裡是第一個該動的地方。</b>
+                減少 n_estimators、降低 max_depth、調高 min_child_samples、把 subsample / colsample
+                調小，都是讓模型「別把訓練資料背起來」的手段。
+                {!hasLearningRate && "　Random Forest 的樹是各自獨立長的，不是一棵補一棵，所以沒有學習率這個概念。"}
+              </p>
+            </>
+          )}
 
           {isNeural && (
             <>
@@ -406,6 +522,15 @@ export default function AdminModelsPage() {
             </>
           )}
 
+          <p className="order-hint">
+            <b>預測目標</b>決定模型要學什麼。「超額報酬」是個股報酬減掉同一段期間的大盤報酬——
+            大盤漲 3% 的日子幾乎每檔都達標、跌 3% 的日子幾乎每檔都不達標，用絕對報酬的話模型有
+            相當一部分容量會耗在猜大盤上。這個系統實際做的是「每天挑相對最強的前 10 名」，
+            超額報酬才對得上這件事。
+            　注意換成超額報酬之後，同樣的門檻代表的意思不一樣了（達標率會明顯下降），
+            兩種模式的數字不能直接互相比較。
+          </p>
+
           <h3 className="tutorial-heading">選股分數怎麼算</h3>
           {/* 權重就是上面那兩個欄位，這裡不重複整套公式說明，連到模型教學即可 */}
           <p className="order-hint">
@@ -414,7 +539,24 @@ export default function AdminModelsPage() {
             <Link to="/model-tutorial#score-formula">模型教學</Link>。
           </p>
 
-          <h3 className="tutorial-heading">訓練特徵（已勾選 {features.length} 項）</h3>
+          <h3 className="tutorial-heading">訓練特徵（已勾選 {features.length} / {defaults.features.length} 項）</h3>
+          <div className="strategy-form-grid">
+            <label>
+              特徵集
+              <select value={presetKey} onChange={(e) => applyPreset(e.target.value)}>
+                {defaults.feature_presets.map((p) => (
+                  <option key={p.key} value={p.key}>
+                    {p.label}（{p.features.length} 項）
+                  </option>
+                ))}
+                <option value="custom">自訂</option>
+              </select>
+            </label>
+          </div>
+          <p className="order-hint">
+            {defaults.feature_presets.find((p) => p.key === presetKey)?.description ??
+              "自己勾選要用哪些特徵。動過任何一個勾選就會切換到這個模式。"}
+          </p>
           <div className="feature-checkbox-grid">
             {defaults.features.map((f) => (
               <label key={f.key} className={features.includes(f.key) ? "feature-checkbox active" : "feature-checkbox"}>

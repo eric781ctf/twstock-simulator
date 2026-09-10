@@ -274,6 +274,9 @@ class PredictionModel(Base):
     # 預測目標：未來 n_days 天的報酬率（迴歸），以及是否超過 threshold_percent（分類）
     n_days: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
     threshold_percent: Mapped[float] = mapped_column(Float, nullable=False, default=3.0)
+    # 預測的是絕對報酬還是超額報酬（減掉大盤）。舊模型沒有這個欄位，
+    # 取不到就是 absolute——它們當初訓練時本來就是那樣算的
+    label_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="absolute")
 
     # 選股分數一律用橫斷面標準化加權（見 services/ml/train.py 的 SCORE_FORMULA_INFO）
     score_formula: Mapped[str] = mapped_column(String(20), nullable=False, default="zscore_weighted")
@@ -281,6 +284,8 @@ class PredictionModel(Base):
 
     # 神經網路類型才會用到：層數與每層神經元數、啟用函數、dropout、epochs 等
     network_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # 樹模型的超參數（棵數、深度、學習率、抽樣比例…）
+    tree_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     # 出場規則（四層，依序判斷，見 services/ml/exit_rules.py）
     min_hold_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -308,6 +313,36 @@ class PredictionModel(Base):
     error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     trained_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ChipDaily(Base):
+    """每檔股票、每個交易日的籌碼面資料（三大法人買賣超與信用交易餘額）。
+
+    台股外資持股比重高，法人買賣超是這個市場長期被討論最多的訊號之一。
+    資料來自 TWSE 每日公開的 T86（三大法人買賣超日報）與 MI_MARGN（融資融券），
+    兩支都是「一次一天、拿全市場」，跟日K回補走同一種請求形狀。
+
+    單位保持 TWSE 原始的樣子：法人買賣超是「股數」，信用交易餘額是「交易單位
+    （張）」。兩者不換算成同一單位——特徵那邊本來就要各自除以成交量或前值做
+    正規化，先換算只會多一次無意義的乘除。
+    """
+
+    __tablename__ = "chip_daily"
+    __table_args__ = (UniqueConstraint("stock_code", "trade_date", name="uq_chip_daily_code_date"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    stock_code: Mapped[str] = mapped_column(ForeignKey("stocks.code"), nullable=False, index=True)
+    trade_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+
+    # 買賣超股數，正數是買超。外資這欄不含外資自營商，跟 TWSE 的主要欄位一致
+    foreign_net: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    trust_net: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    dealer_net: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    institution_net: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+    # 信用交易餘額（張）。融資餘額常被當成散戶槓桿的代理
+    margin_balance: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    short_balance: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
 
 class ModelScoringRun(Base):

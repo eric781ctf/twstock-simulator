@@ -20,6 +20,9 @@ TWSE_VALUATION_URL = "https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_ALL"
 TPEX_VALUATION_URL = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_peratio_analysis"
 TWSE_VALUATION_HISTORY_URL = "https://www.twse.com.tw/exchangeReport/BWIBBU_d"
 TWSE_DAILY_QUOTES_URL = "https://www.twse.com.tw/exchangeReport/MI_INDEX"
+# 籌碼面：三大法人買賣超日報與信用交易餘額，兩支都是「一次一天、拿全市場」
+TWSE_INSTITUTIONAL_URL = "https://www.twse.com.tw/rwd/zh/fund/T86"
+TWSE_MARGIN_URL = "https://www.twse.com.tw/rwd/zh/marginTrading/MI_MARGN"
 
 _HEADERS = {"User-Agent": "Mozilla/5.0 (twstock-simulator)"}
 
@@ -278,6 +281,112 @@ async def fetch_twse_valuations_for_date(query_date: str) -> list[dict]:
                 "pe_ratio": to_float(row[5]),
                 "dividend_yield": to_float(row[3]),
                 "pb_ratio": to_float(row[6]),
+            }
+        )
+    return result
+
+
+def _parse_int(raw) -> int | None:
+    """TWSE 的數字帶千分位逗號，空白與 "--" 代表沒有資料。"""
+    if raw is None:
+        return None
+    text = str(raw).replace(",", "").strip()
+    if not text or text in ("--", "---"):
+        return None
+    try:
+        return int(float(text))
+    except ValueError:
+        return None
+
+
+async def _get_twse_json(url: str, params: dict, label: str, client: httpx.AsyncClient | None):
+    """共用的 TWSE 取 JSON 流程：限流要能被上層辨識，其他錯誤回 None。"""
+    owns_client = client is None
+    if owns_client:
+        client = httpx.AsyncClient(timeout=30, headers=_HEADERS)
+    try:
+        resp = await client.get(url, params=params)
+        if resp.status_code in (428, 429):
+            raise RateLimitedError(f"TWSE 回應 {resp.status_code}，疑似被限流")
+        resp.raise_for_status()
+        return resp.json()
+    except RateLimitedError:
+        raise
+    except Exception:
+        logger.exception("%s failed for %s", label, params.get("date"))
+        return None
+    finally:
+        if owns_client:
+            await client.aclose()
+
+
+async def fetch_twse_institutional_for_date(
+    query_date: str, client: httpx.AsyncClient | None = None
+) -> list[dict] | None:
+    """某一天全市場的三大法人買賣超。query_date 格式 YYYYMMDD。
+
+    回應包含權證等各種證券（單日一萬多列），呼叫端只會取自己追蹤的那些代號，
+    所以這裡不過濾，保持「原樣回傳」讓職責單純。
+
+    回 None 代表非交易日或抓取失敗，跟「有資料但空的」要分得開。
+    """
+    data = await _get_twse_json(
+        TWSE_INSTITUTIONAL_URL,
+        {"date": query_date, "selectType": "ALL", "response": "json"},
+        "fetch_twse_institutional_for_date",
+        client,
+    )
+    if not data or data.get("stat") != "OK":
+        return None
+
+    # 欄位順序來自 TWSE 的 fields：
+    # [0]證券代號 [4]外陸資買賣超(不含外資自營商) [10]投信買賣超
+    # [11]自營商買賣超 [18]三大法人買賣超
+    result = []
+    for row in data.get("data") or []:
+        if len(row) < 19:
+            continue
+        result.append(
+            {
+                "stock_code": str(row[0]).strip(),
+                "foreign_net": _parse_int(row[4]),
+                "trust_net": _parse_int(row[10]),
+                "dealer_net": _parse_int(row[11]),
+                "institution_net": _parse_int(row[18]),
+            }
+        )
+    return result
+
+
+async def fetch_twse_margin_for_date(
+    query_date: str, client: httpx.AsyncClient | None = None
+) -> list[dict] | None:
+    """某一天全市場的融資融券餘額（單位：交易單位／張）。"""
+    data = await _get_twse_json(
+        TWSE_MARGIN_URL,
+        {"date": query_date, "selectType": "ALL", "response": "json"},
+        "fetch_twse_margin_for_date",
+        client,
+    )
+    if not data or data.get("stat") != "OK":
+        return None
+
+    # 回應有兩張表：全市場統計與個股彙總，要的是後者
+    table = next((t for t in data.get("tables", []) if "彙總" in (t.get("title") or "")), None)
+    if not table:
+        return None
+
+    # [0]代號 [6]融資今日餘額 [12]融券今日餘額
+    # 融資與融券兩組欄位名稱重複（買進/賣出/前日餘額…），只能靠位置取
+    result = []
+    for row in table.get("data") or []:
+        if len(row) < 13:
+            continue
+        result.append(
+            {
+                "stock_code": str(row[0]).strip(),
+                "margin_balance": _parse_int(row[6]),
+                "short_balance": _parse_int(row[12]),
             }
         )
     return result

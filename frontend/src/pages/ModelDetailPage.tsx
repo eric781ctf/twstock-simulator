@@ -214,7 +214,9 @@ export default function ModelDetailPage() {
 
       <h2 className="section-title">模型準確度</h2>
       <div className="panel">
-        <h3 className="tutorial-heading">迴歸：預測報酬率 vs 實際報酬率</h3>
+        <h3 className="tutorial-heading">
+          迴歸：預測 vs 實際{summary.label_mode === "excess" ? "超額報酬" : "報酬率"}
+        </h3>
         {test && (
           <p className="order-hint">
             MAE {num(test.mae)}　RMSE {num(test.rmse)}　Rank IC {num(test.rank_ic, 4)}
@@ -301,7 +303,9 @@ export default function ModelDetailPage() {
             <span className="label">模型類型</span> {summary.model_type}
           </div>
           <div>
-            <span className="label">預測目標</span> 未來 {summary.n_days} 個交易日報酬率，以及是否超過 {summary.threshold_percent}%
+            <span className="label">預測目標</span> 未來 {summary.n_days} 個交易日的
+            {summary.label_mode === "excess" ? "超額報酬（個股減掉大盤）" : "絕對報酬"}
+            ，以及是否超過 {summary.threshold_percent}%
           </div>
           <div>
             <span className="label">訓練特徵</span> {detail.feature_labels.join("、")}

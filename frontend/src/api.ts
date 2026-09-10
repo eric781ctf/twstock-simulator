@@ -3,6 +3,7 @@ import type {
   AdminAccount,
   AuthResponse,
   BackfillStatus,
+  ChipStatus,
   BacktestRequest,
   BacktestResult,
   DailyBar,
@@ -166,6 +167,12 @@ export const api = {
   getDailyBarStats: () => request<DailyBarStats>("/admin/daily-bar-stats"),
 
   getBackfillStatus: () => request<BackfillStatus>("/admin/models/backfill-status"),
+  getChipStatus: () => request<ChipStatus>("/admin/models/chip-status"),
+  triggerChipBackfill: (targetMonths: number) =>
+    request<ChipStatus>("/admin/models/chip-backfill", {
+      method: "POST",
+      body: JSON.stringify({ target_months: targetMonths }),
+    }),
   getModelSchedulers: () => request<SchedulerFlag[]>("/admin/models/schedulers"),
   triggerBackfill: (targetMonths: number) =>
     request<BackfillStatus>("/admin/models/backfill", {

@@ -41,8 +41,21 @@ PHASE_LABELS: dict[str, str] = {
 }
 
 
+# 目前有兩種回補共用這個狀態（日K與籌碼面）。它們共用是刻意的——兩者都打
+# TWSE，同時跑只會讓請求密度加倍，正是節流想避免的事。但畫面上要看得出來
+# 現在跑的是哪一種，不然使用者會以為自己按的那個沒有反應。
+JOB_DAILY_BARS = "daily_bars"
+JOB_CHIP = "chip"
+
+JOB_LABELS: dict[str, str] = {
+    JOB_DAILY_BARS: "日K",
+    JOB_CHIP: "籌碼面",
+}
+
+
 @dataclass
 class BackfillState:
+    job: str = JOB_DAILY_BARS
     phase: str = PHASE_IDLE
     current_target: str | None = None
     processed: int = 0
@@ -71,6 +84,8 @@ def snapshot() -> dict:
         remaining = max(0, int((_state.wait_until - datetime.now(TAIPEI_TZ)).total_seconds()))
 
     return {
+        "job": _state.job,
+        "job_label": JOB_LABELS.get(_state.job, _state.job),
         "phase": _state.phase,
         "phase_label": PHASE_LABELS.get(_state.phase, _state.phase),
         "current_target": _state.current_target,
@@ -86,9 +101,10 @@ def snapshot() -> dict:
     }
 
 
-def begin(remaining_targets: int) -> None:
+def begin(remaining_targets: int, job: str = JOB_DAILY_BARS) -> None:
     global _state
     _state = BackfillState(
+        job=job,
         phase=PHASE_PREPARING,
         remaining_targets=remaining_targets,
         started_at=datetime.now(TAIPEI_TZ),

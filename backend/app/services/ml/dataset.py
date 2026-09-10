@@ -21,16 +21,41 @@ from app.models import DailyBar
 logger = logging.getLogger(__name__)
 
 
+LABEL_ABSOLUTE = "absolute"
+LABEL_EXCESS = "excess"
+
+LABEL_MODES = [LABEL_ABSOLUTE, LABEL_EXCESS]
+
+LABEL_MODE_LABELS: dict[str, str] = {
+    LABEL_ABSOLUTE: "絕對報酬（個股自己漲多少）",
+    LABEL_EXCESS: "超額報酬（個股減掉大盤）",
+}
+
+
 def attach_labels(
     rows: list[dict],
     bars_by_code: dict[str, list[DailyBar]],
     n_days: int,
     threshold_percent: float,
+    label_mode: str = LABEL_ABSOLUTE,
+    market_levels: dict[date, float] | None = None,
 ) -> list[dict]:
     """替每一列補上未來 n 個交易日的報酬率與是否達標。
 
     未來價格用「同一檔股票、往後數 n 根 K 棒」的收盤價；不足 n 根（也就是資料
     尾端那幾天）就沒有 label，直接排除。
+
+    label_mode 決定要預測哪一種報酬：
+
+    - absolute：個股自己漲跌多少。直覺，但這個數字裡混著整個市場的方向——
+      大盤漲 3% 的日子幾乎每檔都達標，跌 3% 的日子幾乎每檔都不達標，模型有
+      相當一部分的容量會耗在猜大盤上。
+    - excess：個股報酬減掉同一段期間的大盤報酬。把市場方向這個最大的共同
+      雜訊源直接消掉，剩下的才是「這檔股票相對其他股票強不強」——而那正是
+      這個系統實際在做的事（每天挑相對最強的前 10 名）。
+
+    大盤報酬取的是「同樣的起訖日期」，不是「同樣的交易日數」：停牌過的股票
+    第 n 根 K 棒可能落在比較晚的日期，這時候要比的是那段實際經過的期間。
     """
     close_index: dict[str, dict[date, int]] = {}
     for code, bars in bars_by_code.items():
@@ -53,13 +78,37 @@ def attach_labels(
             continue
 
         future_return = (future_close - entry_close) / entry_close * 100
+
+        if label_mode == LABEL_EXCESS:
+            market_return = _market_return_between(
+                market_levels, bars[i].trade_date, bars[i + n_days].trade_date
+            )
+            if market_return is None:
+                continue  # 這段期間算不出大盤報酬，就沒有可信的超額報酬可以當答案
+            future_return -= market_return
+
         row = dict(row)
         row["future_return_percent"] = future_return
         row["label"] = 1 if future_return > threshold_percent else 0
         labeled.append(row)
 
-    logger.info("attach_labels: %d 列有完整 label（原始 %d 列）", len(labeled), len(rows))
+    logger.info(
+        "attach_labels(%s): %d 列有完整 label（原始 %d 列）", label_mode, len(labeled), len(rows)
+    )
     return labeled
+
+
+def _market_return_between(
+    market_levels: dict[date, float] | None, start: date, end: date
+) -> float | None:
+    """大盤在 [start, end] 這段期間的報酬率。任一端沒有資料就回 None。"""
+    if not market_levels:
+        return None
+    start_level = market_levels.get(start)
+    end_level = market_levels.get(end)
+    if not start_level or end_level is None:
+        return None
+    return (end_level - start_level) / start_level * 100
 
 
 def split_by_date(rows: list[dict], start: date, end: date) -> list[dict]:

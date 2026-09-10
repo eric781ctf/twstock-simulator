@@ -134,6 +134,8 @@ export type BackfillPhase =
   | "failed";
 
 export interface BackfillProgress {
+  job: string;
+  job_label: string;
   phase: BackfillPhase;
   phase_label: string;
   current_target: string | null;
@@ -197,6 +199,15 @@ export interface NetworkInfo {
   batch_size: number | null;
 }
 
+export interface TreeConfigInput {
+  n_estimators: number;
+  max_depth: number;
+  learning_rate: number;
+  subsample: number;
+  colsample: number;
+  min_child_samples: number;
+}
+
 export interface NetworkConfigInput {
   hidden_sizes: number[];
   activation: Activation;
@@ -207,6 +218,7 @@ export interface NetworkConfigInput {
   patience: number;
   batch_size: number;
 }
+export type LabelMode = "absolute" | "excess";
 export type ScoreFormula = "multiply" | "zscore_weighted";
 export type ModelStatus = "queued" | "training" | "completed" | "failed";
 
@@ -220,6 +232,9 @@ export interface ModelTypeOption {
   label: string;
   is_neural: boolean;
   is_sequence: boolean;
+  is_tree: boolean;
+  /** 隨機森林沒有學習率 */
+  has_learning_rate: boolean;
 }
 
 export interface ScoreFormulaInfo {
@@ -232,6 +247,13 @@ export interface ScoreFormulaInfo {
   limitation: string;
 }
 
+export interface FeaturePreset {
+  key: string;
+  label: string;
+  description: string;
+  features: string[];
+}
+
 export interface TrainDefaults {
   latest_data_date: string | null;
   train_start: string;
@@ -241,6 +263,7 @@ export interface TrainDefaults {
   test_start: string;
   test_end: string;
   default_features: string[];
+  feature_presets: FeaturePreset[];
   features: FeatureOption[];
   model_types: ModelTypeOption[];
   score_formula: ScoreFormulaInfo;
@@ -252,8 +275,10 @@ export interface ModelTrainRequest {
   feature_config: string[];
   n_days: number;
   threshold_percent: number;
+  label_mode: LabelMode;
   score_weights?: { return: number; probability: number } | null;
   network_config?: NetworkConfigInput | null;
+  tree_config?: TreeConfigInput | null;
   min_hold_days?: number | null;
   max_hold_days?: number | null;
   stop_loss_percent?: number | null;
@@ -355,6 +380,8 @@ export interface ModelSummary {
   is_archived: boolean;
   n_days: number;
   threshold_percent: number;
+  label_mode: string;
+  label_mode_label: string;
   score_formula: ScoreFormula;
   training_duration_seconds: number | null;
   /** 訓練途中才有值，完成或失敗後回到 null */
@@ -563,4 +590,11 @@ export interface ModelDeleteResult {
   deleted_holdings: number;
   deleted_scoring_runs: number;
   removed_artifact: boolean;
+}
+
+export interface ChipStatus {
+  earliest_date: string | null;
+  latest_date: string | null;
+  total_rows: number;
+  progress: BackfillProgress;
 }

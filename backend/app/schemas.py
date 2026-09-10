@@ -139,6 +139,9 @@ class BackfillProgressOut(BaseModel):
     """回補任務當下的即時進度。phase 分成閒置/準備中/回補中/節流等待中/
     被限流中止/完成/失敗——特別要能分辨「我們主動節流」跟「被 TWSE 擋」。"""
 
+    # 現在跑的是哪一種回補（日K／籌碼面）——兩者共用同一個狀態
+    job: str
+    job_label: str
     phase: str
     phase_label: str
     current_target: str | None
@@ -159,6 +162,15 @@ class BackfillStatusOut(BaseModel):
     progress: BackfillProgressOut
 
 
+class ChipStatusOut(BaseModel):
+    """籌碼面資料的覆蓋範圍與當下的回補進度。"""
+
+    earliest_date: date | None
+    latest_date: date | None
+    total_rows: int
+    progress: BackfillProgressOut
+
+
 class BackfillTargetIn(BaseModel):
     target_months: int = Field(gt=0, le=120)
 
@@ -175,6 +187,10 @@ class ModelTypeOptionOut(BaseModel):
     is_neural: bool
     # 吃「連續 T 天的視窗」的類型（GRU/LSTM）；前端據此多顯示序列長度欄位
     is_sequence: bool = False
+    # 樹模型；前端據此顯示樹的超參數設定
+    is_tree: bool = False
+    # 隨機森林沒有學習率，那一欄要停用
+    has_learning_rate: bool = True
 
 
 class NetworkLayerOut(BaseModel):
@@ -234,6 +250,18 @@ class NetworkConfigIn(BaseModel):
         return self
 
 
+class TreeConfigIn(BaseModel):
+    """樹模型的超參數。名稱刻意取通用的，後端再翻譯成各套件自己的參數名。"""
+
+    n_estimators: int = Field(default=300, ge=10, le=5000)
+    max_depth: int = Field(default=6, ge=1, le=32)
+    # 隨機森林沒有學習率（樹各自獨立長，不是一棵補一棵），送了會被忽略
+    learning_rate: float = Field(default=0.05, gt=0, le=1)
+    subsample: float = Field(default=0.8, gt=0, le=1)
+    colsample: float = Field(default=0.8, gt=0, le=1)
+    min_child_samples: int = Field(default=20, ge=1, le=10000)
+
+
 class ModelDeleteResultOut(BaseModel):
     """刪除結果連帶刪掉多少東西一起回報，讓 admin 看得到這次到底移除了什麼。"""
 
@@ -273,6 +301,15 @@ class ScoreFormulaInfoOut(BaseModel):
     limitation: str
 
 
+class FeaturePresetOut(BaseModel):
+    """現成的特徵組合。71 個勾選框沒辦法用，預設集才是實際的操作方式。"""
+
+    key: str
+    label: str
+    description: str
+    features: list[str]
+
+
 class TrainDefaultsOut(BaseModel):
     """給訓練表單用的預設值與可選項目：建議的六個切分日期（依本地資料最新
     日期往回推）、可勾選的特徵、可選的模型類型。"""
@@ -285,6 +322,7 @@ class TrainDefaultsOut(BaseModel):
     test_start: date
     test_end: date
     default_features: list[str]
+    feature_presets: list[FeaturePresetOut]
     features: list[FeatureOptionOut]
     model_types: list[ModelTypeOptionOut]
     score_formula: ScoreFormulaInfoOut
@@ -298,9 +336,11 @@ class ModelTrainRequest(BaseModel):
     feature_config: list[str] = Field(min_length=1)
     n_days: int = Field(gt=0, le=60)
     threshold_percent: float
+    label_mode: Literal["absolute", "excess"] = "excess"
     # 公式固定用橫斷面標準化，只有權重可調
     score_weights: dict | None = None
     network_config: NetworkConfigIn | None = None
+    tree_config: TreeConfigIn | None = None
 
     min_hold_days: int | None = Field(default=None, ge=0, le=250)
     max_hold_days: int | None = Field(default=None, ge=1, le=250)
@@ -338,6 +378,8 @@ class ModelSummaryOut(BaseModel):
     is_archived: bool
     n_days: int
     threshold_percent: float
+    label_mode: str = "absolute"
+    label_mode_label: str = ""
     score_formula: str
     training_duration_seconds: float | None
     # 訓練途中才有值（階段、第幾個 epoch、當下的 loss），完成或失敗後回到 None
