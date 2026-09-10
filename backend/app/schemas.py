@@ -187,6 +187,10 @@ class ModelTypeOptionOut(BaseModel):
     is_neural: bool
     # 吃「連續 T 天的視窗」的類型（GRU/LSTM）；前端據此多顯示序列長度欄位
     is_sequence: bool = False
+    # 樹模型；前端據此顯示樹的超參數設定
+    is_tree: bool = False
+    # 隨機森林沒有學習率，那一欄要停用
+    has_learning_rate: bool = True
 
 
 class NetworkLayerOut(BaseModel):
@@ -244,6 +248,18 @@ class NetworkConfigIn(BaseModel):
         if any(size < 1 or size > 1024 for size in self.hidden_sizes):
             raise ValueError("每層神經元數必須介於 1~1024")
         return self
+
+
+class TreeConfigIn(BaseModel):
+    """樹模型的超參數。名稱刻意取通用的，後端再翻譯成各套件自己的參數名。"""
+
+    n_estimators: int = Field(default=300, ge=10, le=5000)
+    max_depth: int = Field(default=6, ge=1, le=32)
+    # 隨機森林沒有學習率（樹各自獨立長，不是一棵補一棵），送了會被忽略
+    learning_rate: float = Field(default=0.05, gt=0, le=1)
+    subsample: float = Field(default=0.8, gt=0, le=1)
+    colsample: float = Field(default=0.8, gt=0, le=1)
+    min_child_samples: int = Field(default=20, ge=1, le=10000)
 
 
 class ModelDeleteResultOut(BaseModel):
@@ -324,6 +340,7 @@ class ModelTrainRequest(BaseModel):
     # 公式固定用橫斷面標準化，只有權重可調
     score_weights: dict | None = None
     network_config: NetworkConfigIn | None = None
+    tree_config: TreeConfigIn | None = None
 
     min_hold_days: int | None = Field(default=None, ge=0, le=250)
     max_hold_days: int | None = Field(default=None, ge=1, le=250)

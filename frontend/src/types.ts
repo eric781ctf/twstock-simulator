@@ -199,6 +199,15 @@ export interface NetworkInfo {
   batch_size: number | null;
 }
 
+export interface TreeConfigInput {
+  n_estimators: number;
+  max_depth: number;
+  learning_rate: number;
+  subsample: number;
+  colsample: number;
+  min_child_samples: number;
+}
+
 export interface NetworkConfigInput {
   hidden_sizes: number[];
   activation: Activation;
@@ -223,6 +232,9 @@ export interface ModelTypeOption {
   label: string;
   is_neural: boolean;
   is_sequence: boolean;
+  is_tree: boolean;
+  /** 隨機森林沒有學習率 */
+  has_learning_rate: boolean;
 }
 
 export interface ScoreFormulaInfo {
@@ -266,6 +278,7 @@ export interface ModelTrainRequest {
   label_mode: LabelMode;
   score_weights?: { return: number; probability: number } | null;
   network_config?: NetworkConfigInput | null;
+  tree_config?: TreeConfigInput | null;
   min_hold_days?: number | null;
   max_hold_days?: number | null;
   stop_loss_percent?: number | null;

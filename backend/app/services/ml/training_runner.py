@@ -215,6 +215,7 @@ def _train_sync(model_id: int) -> dict:
             y_validation_reg,
             y_validation_clf,
             network_config=model.network_config,
+            tree_config=model.tree_config,
             on_epoch_end=lambda info: progress("training", info),
         )
 

@@ -27,6 +27,7 @@ def run_lightweight_migrations(engine: Engine) -> None:
         conn.execute(text("ALTER TABLE daily_bars ALTER COLUMN volume TYPE BIGINT"))
         conn.execute(text("ALTER TABLE prediction_models ADD COLUMN IF NOT EXISTS network_config JSON"))
         conn.execute(text("ALTER TABLE prediction_models ADD COLUMN IF NOT EXISTS training_progress JSON"))
+        conn.execute(text("ALTER TABLE prediction_models ADD COLUMN IF NOT EXISTS tree_config JSON"))
         conn.execute(
             text(
                 "ALTER TABLE prediction_models ADD COLUMN IF NOT EXISTS "

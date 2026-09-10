@@ -96,6 +96,12 @@ export default function AdminModelsPage() {
   const [sequenceLength, setSequenceLength] = useState("20");
   const [patience, setPatience] = useState("10");
   const [batchSize, setBatchSize] = useState("512");
+  const [nEstimators, setNEstimators] = useState("300");
+  const [treeDepth, setTreeDepth] = useState("6");
+  const [treeLearningRate, setTreeLearningRate] = useState("0.05");
+  const [subsample, setSubsample] = useState("0.8");
+  const [colsample, setColsample] = useState("0.8");
+  const [minChildSamples, setMinChildSamples] = useState("20");
   const [dates, setDates] = useState({
     train_start: "",
     train_end: "",
@@ -198,6 +204,16 @@ export default function AdminModelsPage() {
             batch_size: Number(batchSize),
           }
         : null,
+      tree_config: isTree
+        ? {
+            n_estimators: Number(nEstimators),
+            max_depth: Number(treeDepth),
+            learning_rate: Number(treeLearningRate),
+            subsample: Number(subsample),
+            colsample: Number(colsample),
+            min_child_samples: Number(minChildSamples),
+          }
+        : null,
       min_hold_days: optionalNumber(minHold),
       max_hold_days: optionalNumber(maxHold),
       stop_loss_percent: optionalNumber(stopLoss),
@@ -259,6 +275,8 @@ export default function AdminModelsPage() {
   const selectedType = defaults?.model_types.find((t) => t.key === modelType);
   const isNeural = selectedType?.is_neural ?? false;
   const isSequence = selectedType?.is_sequence ?? false;
+  const isTree = selectedType?.is_tree ?? false;
+  const hasLearningRate = selectedType?.has_learning_rate ?? true;
   const parsedHiddenSizes = hiddenSizes
     .split(/[,\s]+/)
     .map((v) => Number(v.trim()))
@@ -327,6 +345,84 @@ export default function AdminModelsPage() {
               />
             </label>
           </div>
+
+          {isTree && (
+            <>
+              <h3 className="tutorial-heading">樹模型參數</h3>
+              <p className="order-hint">
+                這幾個名稱是通用的，後端會翻譯成各套件自己的參數名（例如「葉節點最少樣本數」在
+                XGBoost 是 min_child_weight、在 LightGBM 是 min_child_samples、在 Random Forest 是
+                min_samples_leaf）。
+              </p>
+              <div className="strategy-form-grid">
+                <label>
+                  n_estimators
+                  <input
+                    type="number"
+                    min={10}
+                    max={5000}
+                    value={nEstimators}
+                    onChange={(e) => setNEstimators(e.target.value)}
+                  />
+                </label>
+                <label>
+                  max_depth
+                  <input type="number" min={1} max={32} value={treeDepth} onChange={(e) => setTreeDepth(e.target.value)} />
+                </label>
+                <label>
+                  learning_rate
+                  <input
+                    type="number"
+                    step="0.01"
+                    min={0.001}
+                    max={1}
+                    value={hasLearningRate ? treeLearningRate : ""}
+                    disabled={!hasLearningRate}
+                    placeholder={hasLearningRate ? "" : "此模型沒有學習率"}
+                    onChange={(e) => setTreeLearningRate(e.target.value)}
+                  />
+                </label>
+                <label>
+                  subsample
+                  <input
+                    type="number"
+                    step="0.05"
+                    min={0.1}
+                    max={1}
+                    value={subsample}
+                    onChange={(e) => setSubsample(e.target.value)}
+                  />
+                </label>
+                <label>
+                  colsample
+                  <input
+                    type="number"
+                    step="0.05"
+                    min={0.1}
+                    max={1}
+                    value={colsample}
+                    onChange={(e) => setColsample(e.target.value)}
+                  />
+                </label>
+                <label>
+                  min_child_samples
+                  <input
+                    type="number"
+                    min={1}
+                    max={10000}
+                    value={minChildSamples}
+                    onChange={(e) => setMinChildSamples(e.target.value)}
+                  />
+                </label>
+              </div>
+              <p className="order-hint">
+                <b>train 分數遠高於 test 時，這裡是第一個該動的地方。</b>
+                減少 n_estimators、降低 max_depth、調高 min_child_samples、把 subsample / colsample
+                調小，都是讓模型「別把訓練資料背起來」的手段。
+                {!hasLearningRate && "　Random Forest 的樹是各自獨立長的，不是一棵補一棵，所以沒有學習率這個概念。"}
+              </p>
+            </>
+          )}
 
           {isNeural && (
             <>

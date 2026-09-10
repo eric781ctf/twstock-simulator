@@ -34,6 +34,7 @@ from app.services.ml.train import (
     MODEL_TYPES,
     NEURAL_MODEL_TYPES,
     SEQUENCE_MODEL_TYPES,
+    TREE_MODEL_TYPES,
     SCORE_FORMULA_INFO,
     SCORE_FORMULA_KEY,
 )
@@ -60,6 +61,8 @@ def get_train_defaults(db: Session = Depends(get_db), _: User = Depends(require_
                 label=MODEL_TYPE_LABELS[key],
                 is_neural=key in NEURAL_MODEL_TYPES,
                 is_sequence=key in SEQUENCE_MODEL_TYPES,
+                is_tree=key in TREE_MODEL_TYPES,
+                has_learning_rate=key != "random_forest",
             )
             for key in MODEL_TYPES
         ],
@@ -129,6 +132,7 @@ async def create_model(
         score_formula=SCORE_FORMULA_KEY,
         score_weights=payload.score_weights,
         network_config=payload.network_config.model_dump() if payload.network_config else None,
+        tree_config=payload.tree_config.model_dump() if payload.tree_config else None,
         min_hold_days=payload.min_hold_days,
         max_hold_days=payload.max_hold_days,
         stop_loss_percent=payload.stop_loss_percent,

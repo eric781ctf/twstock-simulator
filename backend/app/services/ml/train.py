@@ -35,6 +35,20 @@ NEURAL_MODEL_TYPES = ["mlp", "gru", "lstm"]
 # 吃「連續 T 天的視窗」而不是「某一天的一列」的模型；表單會多一個序列長度欄位
 SEQUENCE_MODEL_TYPES = ["gru", "lstm"]
 
+# 有「幾棵樹、多深」這種概念的類型；表單會對這些顯示樹模型的參數設定
+TREE_MODEL_TYPES = ["xgboost", "lightgbm", "random_forest"]
+
+# 樹模型的預設參數。刻意用一組跨三種模型都講得通的名稱，各自再對應到
+# 該套件自己的參數名——不然表單要為三種模型各做一份，使用者也得記三套術語。
+DEFAULT_TREE_CONFIG: dict = {
+    "n_estimators": 300,
+    "max_depth": 6,
+    "learning_rate": 0.05,
+    "subsample": 0.8,
+    "colsample": 0.8,
+    "min_child_samples": 20,
+}
+
 # 名稱一律只寫英文：這些演算法的通用名稱就是英文，中文譯名反而各家不一。
 # 「需要 GPU」「吃連續 N 天序列」這類特性也不寫進名稱裡——那是 is_neural /
 # is_sequence 兩個旗標的職責，前端據此顯示，才不會有一天旗標改了名稱卻沒改。
@@ -49,23 +63,69 @@ MODEL_TYPE_LABELS: dict[str, str] = {
 }
 
 
-def build_models(model_type: str):
+def build_models(model_type: str, tree_config: dict | None = None):
     """回傳 (迴歸模型, 分類模型)。四種選項都是成對的，logistic_regression 的
-    迴歸對應物是普通線性回歸（邏輯迴歸本身只能做分類）。"""
+    迴歸對應物是普通線性回歸（邏輯迴歸本身只能做分類）。
+
+    tree_config 用一組通用名稱（樹的數量、深度、學習率、樣本/特徵抽樣比例、
+    葉節點最少樣本數），這裡再翻譯成各套件自己的參數名。對應不是每一個都
+    完全等價，不等價的地方在下面標出來。
+    """
+    config = {**DEFAULT_TREE_CONFIG, **(tree_config or {})}
+    n_estimators = int(config["n_estimators"])
+    max_depth = int(config["max_depth"])
+    learning_rate = float(config["learning_rate"])
+    subsample = float(config["subsample"])
+    colsample = float(config["colsample"])
+    min_child = int(config["min_child_samples"])
+
     if model_type == "xgboost":
         from xgboost import XGBClassifier, XGBRegressor
 
-        common = {"n_estimators": 300, "max_depth": 5, "learning_rate": 0.05, "subsample": 0.8, "n_jobs": 2}
+        common = {
+            "n_estimators": n_estimators,
+            "max_depth": max_depth,
+            "learning_rate": learning_rate,
+            "subsample": subsample,
+            "colsample_bytree": colsample,
+            # 注意：min_child_weight 是「葉節點的 hessian 總和」而不是樣本數。
+            # 平方誤差的 hessian 是 1，所以對迴歸頭它就等於樣本數；但分類頭用
+            # logloss，hessian 是 p(1-p) ≤ 0.25，同樣的數字會比迴歸頭更嚴格。
+            "min_child_weight": min_child,
+            "n_jobs": 2,
+        }
         return XGBRegressor(**common), XGBClassifier(**common, eval_metric="logloss")
 
     if model_type == "lightgbm":
         from lightgbm import LGBMClassifier, LGBMRegressor
 
-        common = {"n_estimators": 300, "max_depth": 6, "learning_rate": 0.05, "n_jobs": 2, "verbose": -1}
+        common = {
+            "n_estimators": n_estimators,
+            "max_depth": max_depth,
+            "learning_rate": learning_rate,
+            "subsample": subsample,
+            # LightGBM 的 subsample 要搭配 subsample_freq > 0 才會真的生效，
+            # 只設 subsample 是完全沒有作用的（這是很容易踩到的一個坑）
+            "subsample_freq": 1,
+            "colsample_bytree": colsample,
+            "min_child_samples": min_child,
+            "n_jobs": 2,
+            "verbose": -1,
+        }
         return LGBMRegressor(**common), LGBMClassifier(**common)
 
     if model_type == "random_forest":
-        common = {"n_estimators": 200, "max_depth": 10, "n_jobs": 2, "random_state": 42}
+        common = {
+            "n_estimators": n_estimators,
+            "max_depth": max_depth,
+            # 隨機森林沒有學習率——它的樹是各自獨立長的，不是一棵補一棵，
+            # 所以沒有「每一步走多大」這件事。表單上會把這欄停用。
+            "max_samples": subsample,
+            "max_features": colsample,
+            "min_samples_leaf": min_child,
+            "n_jobs": 2,
+            "random_state": 42,
+        }
         return RandomForestRegressor(**common), RandomForestClassifier(**common)
 
     if model_type == "logistic_regression":
@@ -144,6 +204,9 @@ def evaluate(
 
 
 MIN_HEALTHY_TRAIN_SAMPLES = 2000
+# 低於這個 Rank IC 就等於沒有排序能力。業界的多因子訊號長期穩定在 0.02~0.05
+# 就算堪用，所以這個門檻已經放得很寬了
+MIN_USEFUL_RANK_IC = 0.01
 
 
 def build_data_warnings(
@@ -189,6 +252,17 @@ def build_data_warnings(
                 f"訓練 Rank IC（{train_ic:.3f}）遠高於驗證 Rank IC（{validation_ic:.3f}）。"
                 "模型在沒看過的資料上幾乎沒有排序能力，照它選股跟隨機選相去不遠。"
             )
+
+    # 上面那些警告全都在講「訓練分數比驗證分數高太多」。但一個從頭到尾都很差的
+    # 模型（訓練也不高、驗證也不高）會安靜地通過所有檢查——實測把樹的容量壓小
+    # 之後，train/validation 落差確實縮小了、警告全部消失，但測試集的排序能力
+    # 反而更差。那種「沒有警告」會讓人以為模型沒問題。
+    if validation_ic is not None and validation_ic < MIN_USEFUL_RANK_IC:
+        warnings.append(
+            f"驗證 Rank IC 只有 {validation_ic:+.3f}，實質上沒有排序能力"
+            f"（業界認為長期穩定在 +0.02~+0.05 才算堪用）。"
+            "不管訓練分數多少，照這個模型選股跟隨機選沒有差別。"
+        )
 
     warnings.extend(_loss_curve_warnings(network_info))
     return warnings
@@ -248,6 +322,7 @@ def train_dual_task(
     y_validation_reg: np.ndarray,
     y_validation_clf: np.ndarray,
     network_config: dict | None = None,
+    tree_config: dict | None = None,
     on_epoch_end=None,
 ) -> tuple[object, object, dict]:
     """訓練並用驗證集評估。回傳 (迴歸模型, 分類模型, metrics)。
@@ -303,7 +378,7 @@ def train_dual_task(
         importance = torch_model.input_weight_importance(feature_keys)
         regression_importance = classification_importance = importance
     else:
-        regressor, classifier = build_models(model_type)
+        regressor, classifier = build_models(model_type, tree_config)
         regressor.fit(x_train, y_train_reg)
         classifier.fit(x_train, y_train_clf)
         regression_importance = _feature_importance(regressor, feature_keys)
