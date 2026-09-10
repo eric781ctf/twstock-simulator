@@ -23,6 +23,7 @@ TWSE_DAILY_QUOTES_URL = "https://www.twse.com.tw/exchangeReport/MI_INDEX"
 # 籌碼面：三大法人買賣超日報與信用交易餘額，兩支都是「一次一天、拿全市場」
 TWSE_INSTITUTIONAL_URL = "https://www.twse.com.tw/rwd/zh/fund/T86"
 TWSE_MARGIN_URL = "https://www.twse.com.tw/rwd/zh/marginTrading/MI_MARGN"
+TWSE_QFIIS_URL = "https://www.twse.com.tw/rwd/zh/fund/MI_QFIIS"
 
 _HEADERS = {"User-Agent": "Mozilla/5.0 (twstock-simulator)"}
 
@@ -389,4 +390,35 @@ async def fetch_twse_margin_for_date(
                 "short_balance": _parse_int(row[12]),
             }
         )
+    return result
+
+
+async def fetch_twse_foreign_holding_for_date(
+    query_date: str, client: httpx.AsyncClient | None = None
+) -> list[dict] | None:
+    """某一天全市場的外資及陸資持股比率。
+
+    selectType 要用 ALLBUT0999 而不是 ALL——用 ALL 時這支端點會回 stat=OK
+    但 data 是空的（欄位定義還在，資料沒有），很容易被誤判成「那天沒有資料」。
+    """
+    data = await _get_twse_json(
+        TWSE_QFIIS_URL,
+        {"date": query_date, "selectType": "ALLBUT0999", "response": "json"},
+        "fetch_twse_foreign_holding_for_date",
+        client,
+    )
+    if not data or data.get("stat") != "OK":
+        return None
+
+    # [0]證券代號 [3]發行股數 [5]全體外資及陸資持有股數 [7]全體外資及陸資持股比率
+    result = []
+    for row in data.get("data") or []:
+        if len(row) < 8:
+            continue
+        ratio = row[7]
+        try:
+            ratio = float(str(ratio).replace(",", "").strip())
+        except (TypeError, ValueError):
+            ratio = None
+        result.append({"stock_code": str(row[0]).strip(), "foreign_holding_ratio": ratio})
     return result

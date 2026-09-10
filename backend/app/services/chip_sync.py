@@ -21,13 +21,15 @@ from app.services import backfill_status
 from app.services.stock_sync import _HEADERS, _throttled_sleep
 from app.services.twse_client import (
     RateLimitedError,
+    fetch_twse_foreign_holding_for_date,
     fetch_twse_institutional_for_date,
     fetch_twse_margin_for_date,
 )
 
 logger = logging.getLogger(__name__)
 
-# 兩支端點之間、以及每個交易日之間的間隔。比日K稍微保守一點，因為一天要打兩次
+# 各端點之間、以及每個交易日之間的間隔。一天要打三支（法人、信用交易、
+# 外資持股），所以比日K保守
 REQUEST_DELAY_SECONDS = 3.5
 # 一天至少要有這麼多檔才算補過。法人買賣超只有「當天有法人交易」的股票會出現，
 # 所以門檻不能設得像日K那麼高
@@ -72,17 +74,26 @@ async def sync_chip_for_date(
     但信用交易沒拿到，仍然比整天都不寫好。
     """
     combined: dict[str, dict] = {}
+    stamp = day.strftime("%Y%m%d")
 
-    institutional = await fetch_twse_institutional_for_date(day.strftime("%Y%m%d"), client=client)
+    institutional = await fetch_twse_institutional_for_date(stamp, client=client)
     for item in institutional or []:
         code = item.pop("stock_code")
         if code in known_codes:
             combined[code] = dict(item)
 
-    await _throttled_sleep(REQUEST_DELAY_SECONDS, "法人與信用交易兩支端點之間")
+    await _throttled_sleep(REQUEST_DELAY_SECONDS, "籌碼面各端點之間")
 
-    margin = await fetch_twse_margin_for_date(day.strftime("%Y%m%d"), client=client)
+    margin = await fetch_twse_margin_for_date(stamp, client=client)
     for item in margin or []:
+        code = item.pop("stock_code")
+        if code in known_codes:
+            combined.setdefault(code, {}).update(item)
+
+    await _throttled_sleep(REQUEST_DELAY_SECONDS, "籌碼面各端點之間")
+
+    holding = await fetch_twse_foreign_holding_for_date(stamp, client=client)
+    for item in holding or []:
         code = item.pop("stock_code")
         if code in known_codes:
             combined.setdefault(code, {}).update(item)
@@ -97,9 +108,16 @@ async def backfill_chip_data(db: Session, start: date, end: date) -> int:
         backfill_status.finish(backfill_status.PHASE_COMPLETED, "本地還沒有上市股票清單")
         return 0
 
+    # 「補過了」的判斷刻意看**最新加入的欄位**而不是總筆數：加了新欄位之後，
+    # 先前補好的日期在「有幾列」這個舊定義下會被跳過，永遠拿不到新資料。
+    # _upsert 只覆寫非 None 的值，所以重抓既有日期是安全的，只是多花時間。
     existing_counts = dict(
         db.query(ChipDaily.trade_date, func.count(ChipDaily.id))
-        .filter(ChipDaily.trade_date >= start, ChipDaily.trade_date <= end)
+        .filter(
+            ChipDaily.trade_date >= start,
+            ChipDaily.trade_date <= end,
+            ChipDaily.foreign_holding_ratio.isnot(None),
+        )
         .group_by(ChipDaily.trade_date)
         .all()
     )
