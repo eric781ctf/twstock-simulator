@@ -3,7 +3,14 @@ import { Navigate } from "react-router-dom";
 import { api } from "../api";
 import { BarChart } from "../components/BarChart";
 import { useAuth } from "../auth/AuthContext";
-import type { BackfillStatus, ChipStatus, DailyBarStats, SchedulerFlag } from "../types";
+import type {
+  BackfillStatus,
+  ChipStatus,
+  DailyBarStats,
+  IndustryStatus,
+  SchedulerFlag,
+  ShareholdingStatus,
+} from "../types";
 
 function formatWait(seconds: number): string {
   if (seconds < 60) return `${seconds} 秒`;
@@ -23,6 +30,9 @@ export default function AdminPage() {
   const [backfillTargetInput, setBackfillTargetInput] = useState("");
   const [chipStatus, setChipStatus] = useState<ChipStatus | null>(null);
   const [chipTargetInput, setChipTargetInput] = useState("");
+  const [shareholding, setShareholding] = useState<ShareholdingStatus | null>(null);
+  const [industry, setIndustry] = useState<IndustryStatus | null>(null);
+  const [dataBusy, setDataBusy] = useState(false);
   const [backfillBusy, setBackfillBusy] = useState(false);
   const [schedulers, setSchedulers] = useState<SchedulerFlag[]>([]);
 
@@ -40,6 +50,14 @@ export default function AdminPage() {
     setChipStatus(await api.getChipStatus());
   }, []);
 
+  const refreshShareholding = useCallback(async () => {
+    setShareholding(await api.getShareholdingStatus());
+  }, []);
+
+  const refreshIndustry = useCallback(async () => {
+    setIndustry(await api.getIndustryStatus());
+  }, []);
+
   const refreshSchedulers = useCallback(async () => {
     setSchedulers(await api.getModelSchedulers());
   }, []);
@@ -53,8 +71,18 @@ export default function AdminPage() {
     refreshDailyBarStats();
     refreshBackfillStatus();
     refreshChipStatus();
+    refreshShareholding();
+    refreshIndustry();
     refreshSchedulers();
-  }, [isAdmin, refreshDailyBarStats, refreshBackfillStatus, refreshChipStatus, refreshSchedulers]);
+  }, [
+    isAdmin,
+    refreshDailyBarStats,
+    refreshBackfillStatus,
+    refreshChipStatus,
+    refreshShareholding,
+    refreshIndustry,
+    refreshSchedulers,
+  ]);
 
   // 回補大多數時間都停在節流等待，狀態列要會自己動，不然使用者分不出來是
   // 系統卡住還是正在乖乖等。只在真的有任務在跑時輪詢，閒置時不用一直打。
@@ -107,6 +135,20 @@ export default function AdminPage() {
       setError(err instanceof Error ? err.message : "觸發回補失敗");
     } finally {
       setBackfillBusy(false);
+    }
+  }
+
+  // 這三個都是「一次請求就結束」的同步，跟日K／籌碼面那種要跑幾十分鐘的
+  // 回補不一樣，所以共用一個 busy 旗標、不需要進度輪詢。
+  async function runDataAction<T>(action: () => Promise<T>, setter: (v: T) => void, fallback: string) {
+    setError(null);
+    setDataBusy(true);
+    try {
+      setter(await action());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : fallback);
+    } finally {
+      setDataBusy(false);
     }
   }
 
@@ -237,6 +279,82 @@ ${flag.description}`)) return;
           </button>
         </div>
       </form>
+
+      <div className="panel admin-action-card">
+        <h2>集保股權分散表</h2>
+        <p className="order-hint">
+          每週五的持股分級快照（TDCC），用來算大戶／散戶籌碼流向。目前涵蓋：
+          <span className="admin-current-value">
+            {shareholding
+              ? shareholding.earliest_date
+                ? `${shareholding.earliest_date} ~ ${shareholding.latest_date}`
+                : "尚無資料"
+              : "載入中..."}
+          </span>
+          　共
+          <span className="admin-current-value">{shareholding ? shareholding.week_count : "-"}</span>
+          週、
+          <span className="admin-current-value">{shareholding ? shareholding.total_rows.toLocaleString() : "-"}</span>
+          筆
+        </p>
+        <p className="order-hint">
+          TDCC 的線上端點<strong>只提供最新一週</strong>，沒有歷史查詢——所以歷史只能靠先前存下來的
+          CSV 匯入（放在 backend/tdcc_data/），之後每週由「抓最新一週」接著累積。
+        </p>
+        {shareholding?.message && <p className="order-hint">{shareholding.message}</p>}
+        <div className="admin-action-row">
+          <button
+            className="submit"
+            type="button"
+            disabled={dataBusy}
+            onClick={() => runDataAction(api.importShareholding, setShareholding, "匯入失敗")}
+          >
+            {dataBusy ? "處理中..." : "匯入本機 CSV"}
+          </button>
+          <button
+            className="submit"
+            type="button"
+            disabled={dataBusy}
+            onClick={() => runDataAction(api.fetchShareholding, setShareholding, "抓取失敗")}
+          >
+            {dataBusy ? "處理中..." : "抓最新一週"}
+          </button>
+        </div>
+      </div>
+
+      <div className="panel admin-action-card">
+        <h2>產業別</h2>
+        <p className="order-hint">
+          來自 TWSE 上市公司基本資料，用來做特徵的「產業中性化」——把每個特徵減掉當天同產業的
+          中位數，剩下的才是這檔相對同業的強弱，避免整個族群同漲同跌被當成個股訊號。目前已分類：
+          <span className="admin-current-value">
+            {industry ? `${industry.classified} / ${industry.total_stocks}` : "載入中..."}
+          </span>
+          　共
+          <span className="admin-current-value">{industry ? industry.industry_count : "-"}</span>
+          個產業
+        </p>
+        <p className="order-hint">
+          這支端點給的是<strong>現在</strong>的分類，拿不到歷史，所以早期樣本是用現況回推的。
+          產業別極少變動，這個近似可以接受，但要知道有這件事。ETF 與受益證券本來就沒有產業別。
+        </p>
+        {industry && industry.top_industries.length > 0 && (
+          <p className="order-hint">
+            檔數最多：{industry.top_industries.map((i) => `${i.label} ${i.count}`).join("、")}
+          </p>
+        )}
+        {industry?.message && <p className="order-hint">{industry.message}</p>}
+        <div className="admin-action-row">
+          <button
+            className="submit"
+            type="button"
+            disabled={dataBusy}
+            onClick={() => runDataAction(api.syncIndustries, setIndustry, "同步失敗")}
+          >
+            {dataBusy ? "處理中..." : "同步產業別"}
+          </button>
+        </div>
+      </div>
 
       <div className="panel">
         <h2>排程開關</h2>

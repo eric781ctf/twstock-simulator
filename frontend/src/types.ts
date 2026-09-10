@@ -319,6 +319,7 @@ export interface ModelTrainRequest {
   label_mode: LabelMode;
   validation_mode: ValidationMode;
   feature_scaling: FeatureScaling;
+  industry_neutral: boolean;
   walk_forward_config?: WalkForwardConfigInput | null;
   score_weights?: { return: number; probability: number } | null;
   network_config?: NetworkConfigInput | null;
@@ -431,6 +432,7 @@ export interface ModelSummary {
   validation_mode: string;
   feature_scaling: string;
   feature_scaling_label: string;
+  industry_neutral: boolean;
   score_formula: ScoreFormula;
   training_duration_seconds: number | null;
   /** 訓練途中才有值，完成或失敗後回到 null */
@@ -646,4 +648,22 @@ export interface ChipStatus {
   latest_date: string | null;
   total_rows: number;
   progress: BackfillProgress;
+}
+
+export interface ShareholdingStatus {
+  earliest_date: string | null;
+  latest_date: string | null;
+  total_rows: number;
+  /** 週頻資料，所以看的是累積了幾週而不是幾天 */
+  week_count: number;
+  message: string | null;
+}
+
+export interface IndustryStatus {
+  total_stocks: number;
+  /** ETF 與受益證券沒有產業別，所以一定小於 total_stocks */
+  classified: number;
+  industry_count: number;
+  top_industries: { code: string; label: string; count: number }[];
+  message: string | null;
 }

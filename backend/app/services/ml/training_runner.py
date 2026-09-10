@@ -29,10 +29,12 @@ from app.services.ml.dataset import (
     attach_labels,
     fit_scaler,
     fit_scaler_sequences,
+    industry_neutralize,
     rank_normalize,
     split_by_date,
     to_matrix,
 )
+from app.services.industry_sync import load_industry_map
 from app.services.ml.features import MARKET_FEATURE_KEYS, WARMUP_BARS, build_feature_rows
 from app.services.ml.selection import ModelBundle
 from app.services.ml.train import SEQUENCE_MODEL_TYPES, train_dual_task
@@ -171,6 +173,13 @@ def _prepare_rows(db: Session, model: PredictionModel, feature_keys: list[str], 
     # 落在不同折而拿到不同的名次，那是沒有意義的
     if model.feature_scaling == SCALING_RANK:
         labeled = rank_normalize(labeled, feature_keys, skip=set(MARKET_FEATURE_KEYS))
+
+    # 產業中性化排在排名之後：兩者都是「同一天的橫斷面」運算，先排名再減同業
+    # 中位數，得到的是「這檔在同業裡的相對名次」，比直接減原始值穩定
+    if model.industry_neutral:
+        labeled = industry_neutralize(
+            labeled, feature_keys, load_industry_map(db), skip=set(MARKET_FEATURE_KEYS)
+        )
 
     return labeled, bars_by_code
 
@@ -366,6 +375,7 @@ def _train_sync(model_id: int) -> dict:
             scaler_std,
             sequence_length,
             model.feature_scaling,
+            model.industry_neutral,
         )
         bundle = ModelBundle(
             regressor=regressor,
@@ -375,6 +385,7 @@ def _train_sync(model_id: int) -> dict:
             scaler_std=scaler_std,
             sequence_length=sequence_length,
             feature_scaling=model.feature_scaling,
+            industry_neutral=model.industry_neutral,
         )
 
         from app.services.ml.train import build_data_warnings

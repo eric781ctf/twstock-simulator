@@ -85,6 +85,7 @@ export default function AdminModelsPage() {
   const [labelMode, setLabelMode] = useState<LabelMode>("excess");
   const [validationMode, setValidationMode] = useState<ValidationMode>("walk_forward");
   const [featureScaling, setFeatureScaling] = useState<FeatureScaling>("cross_sectional_rank");
+  const [industryNeutral, setIndustryNeutral] = useState(false);
   const [wfTrain, setWfTrain] = useState("6");
   const [wfValidation, setWfValidation] = useState("2");
   const [wfTest, setWfTest] = useState("2");
@@ -201,6 +202,7 @@ export default function AdminModelsPage() {
       label_mode: labelMode,
       validation_mode: validationMode,
       feature_scaling: featureScaling,
+      industry_neutral: industryNeutral,
       walk_forward_config:
         validationMode === "walk_forward"
           ? {
@@ -347,6 +349,16 @@ export default function AdminModelsPage() {
               >
                 <option value="cross_sectional_rank">橫斷面排名</option>
                 <option value="zscore">z-score</option>
+              </select>
+            </label>
+            <label>
+              產業中性化
+              <select
+                value={industryNeutral ? "on" : "off"}
+                onChange={(e) => setIndustryNeutral(e.target.value === "on")}
+              >
+                <option value="off">關閉</option>
+                <option value="on">開啟（減掉同業中位數）</option>
               </select>
             </label>
             <label>

@@ -58,6 +58,7 @@ def save_bundle(
     scaler_std: np.ndarray,
     sequence_length: int | None = None,
     feature_scaling: str = "zscore",
+    industry_neutral: bool = False,
 ) -> str:
     target = artifact_dir(model_id)
     target.mkdir(parents=True, exist_ok=True)
@@ -71,6 +72,7 @@ def save_bundle(
             "scaler_std": scaler_std,
             "sequence_length": sequence_length,
             "feature_scaling": feature_scaling,
+            "industry_neutral": industry_neutral,
         },
         target / "bundle.joblib",
     )
@@ -109,4 +111,5 @@ def load_bundle(model_artifact_path: str) -> ModelBundle:
         sequence_length=payload.get("sequence_length"),
         # 這個 key 之前存的模型檔沒有，取不到就是舊的 z-score 行為
         feature_scaling=payload.get("feature_scaling", "zscore"),
+        industry_neutral=payload.get("industry_neutral", False),
     )

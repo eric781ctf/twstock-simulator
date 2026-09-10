@@ -85,6 +85,7 @@ def _to_summary(model: PredictionModel, stats: dict) -> ModelSummaryOut:
         validation_mode=model.validation_mode,
         feature_scaling=model.feature_scaling,
         feature_scaling_label=SCALING_MODE_LABELS.get(model.feature_scaling, model.feature_scaling),
+        industry_neutral=model.industry_neutral,
         score_formula=model.score_formula,
         training_duration_seconds=model.training_duration_seconds,
         training_progress=model.training_progress,
@@ -138,6 +139,7 @@ async def create_model(
         tree_config=payload.tree_config.model_dump() if payload.tree_config else None,
         validation_mode=payload.validation_mode,
         feature_scaling=payload.feature_scaling,
+        industry_neutral=payload.industry_neutral,
         walk_forward_config=(
             payload.walk_forward_config.model_dump() if payload.walk_forward_config else None
         ),

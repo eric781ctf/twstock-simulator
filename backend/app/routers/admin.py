@@ -9,21 +9,23 @@ from sqlalchemy.orm import Session
 from app.database import SessionLocal, get_db
 from app.models import ChipDaily, User
 from app.schemas import (
-    ShareholdingStatusOut,
-    ChipStatusOut,
     AdminAccountOut,
     AdminAmountIn,
     BackfillProgressOut,
     BackfillStatusOut,
     BackfillTargetIn,
+    ChipStatusOut,
     DailyBarStatsOut,
     DefaultInitialCashOut,
     FeatureFlagOut,
     FeatureFlagUpdateIn,
+    IndustryStatusOut,
     SchedulerFlagOut,
+    ShareholdingStatusOut,
 )
 from app.services import backfill_status
 from app.services.chip_sync import backfill_chip_data, earliest_chip_date, latest_chip_date
+from app.services.industry_sync import coverage as industry_coverage, sync_industries
 from app.services.shareholding_sync import (
     coverage as shareholding_coverage,
     fetch_latest as fetch_latest_shareholding,
@@ -180,6 +182,20 @@ async def trigger_chip_backfill(
 
     asyncio.create_task(_run_chip_backfill_task(payload.target_months))
     return get_chip_status(db)
+
+
+@router.get("/models/industry-status", response_model=IndustryStatusOut)
+def get_industry_status(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    return IndustryStatusOut(**industry_coverage(db))
+
+
+@router.post("/models/industry-sync", response_model=IndustryStatusOut)
+async def trigger_industry_sync(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    """從 TWSE 抓一次全上市公司的產業別。一次請求拿全部，不需要回補歷史。"""
+    result = await sync_industries(db)
+    status = industry_coverage(db)
+    status["message"] = result["message"]
+    return IndustryStatusOut(**status)
 
 
 @router.get("/models/shareholding-status", response_model=ShareholdingStatusOut)
