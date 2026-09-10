@@ -38,6 +38,12 @@ def run_lightweight_migrations(engine: Engine) -> None:
         conn.execute(
             text(
                 "ALTER TABLE prediction_models ADD COLUMN IF NOT EXISTS "
+                "feature_scaling VARCHAR(30) NOT NULL DEFAULT 'zscore'"
+            )
+        )
+        conn.execute(
+            text(
+                "ALTER TABLE prediction_models ADD COLUMN IF NOT EXISTS "
                 "label_mode VARCHAR(20) NOT NULL DEFAULT 'absolute'"
             )
         )

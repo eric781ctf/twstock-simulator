@@ -15,6 +15,7 @@ import logging
 from datetime import date
 
 import numpy as np
+import pandas as pd
 
 from app.models import DailyBar
 
@@ -164,3 +165,66 @@ def fit_scaler_sequences(x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     標準化過的值，基準當然要涵蓋所有時間步。
     """
     return fit_scaler(x.reshape(-1, x.shape[-1]))
+
+
+SCALING_ZSCORE = "zscore"
+SCALING_RANK = "cross_sectional_rank"
+
+SCALING_MODES = [SCALING_ZSCORE, SCALING_RANK]
+
+SCALING_MODE_LABELS: dict[str, str] = {
+    SCALING_ZSCORE: "z-score（用整個訓練期的平均與標準差）",
+    SCALING_RANK: "橫斷面排名（每天各自換算成全市場分位數）",
+}
+
+
+def rank_normalize(rows: list[dict], feature_keys: list[str], skip: set[str] | None = None) -> list[dict]:
+    """把每個特徵換成「當天在全市場的分位數」（0~1）。
+
+    這是業界處理橫斷面選股特徵的標準做法，跟現行的 z-score 差在基準：
+
+    - z-score 用**整個訓練期**的平均與標準差，等於拿 2025 年的數值直接跟
+      2026 年比。市場整體波動變大的時期，所有股票的特徵會一起偏移。
+    - 排名只用**當天**的橫斷面，比的是「這檔今天在全市場排第幾」——而那正是
+      選股要的。極端值自動被壓進 0~1，不用另外 winsorize。
+
+    只用同一天的資料，不看未來，所以在切分之前做是安全的。
+
+    缺值維持缺值：排名是相對位置，硬給一個數字等於憑空捏造一個名次。
+
+    **skip 裡的特徵不做排名。** 大盤特徵（市場漲跌幅、市場寬度…）在同一天對
+    所有股票是同一個值，做橫斷面排名會讓 1362 檔股票全部拿到同一個名次，
+    等於把那個特徵徹底消滅。實測沒排除時，測試 Rank IC 從 +0.053 掉到 +0.023、
+    標準差從 0.020 漲到 0.046——正是因為佔了近兩成重要性的大盤特徵整批失效。
+    這類「橫斷面上是常數」的特徵本來就不該用橫斷面排名處理。
+    """
+    skip = skip or set()
+    rank_keys = [k for k in feature_keys if k not in skip]
+    if not rank_keys:
+        return rows
+    if not rows:
+        return rows
+
+    frame = pd.DataFrame(
+        {key: [row.get(key) for row in rows] for key in rank_keys},
+        dtype="float64",
+    )
+    frame["__day"] = [row["as_of_date"] for row in rows]
+
+    ranked = frame.groupby("__day", sort=False)[rank_keys].rank(pct=True)
+
+    out: list[dict] = []
+    for i, row in enumerate(rows):
+        new_row = dict(row)
+        for key in rank_keys:
+            value = ranked[key].iat[i]
+            new_row[key] = None if pd.isna(value) else float(value)
+        out.append(new_row)
+
+    logger.info(
+        "rank_normalize: %d 列、%d 個特徵換算成當日橫斷面分位數（%d 個跳過）",
+        len(out),
+        len(rank_keys),
+        len(feature_keys) - len(rank_keys),
+    )
+    return out

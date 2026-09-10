@@ -24,14 +24,16 @@ from app.services.matching import TAIPEI_TZ
 from app.services.ml import artifacts
 from app.services.ml.backtest_eval import run_backtest
 from app.services.ml.dataset import (
+    SCALING_RANK,
     apply_scaler,
     attach_labels,
     fit_scaler,
     fit_scaler_sequences,
+    rank_normalize,
     split_by_date,
     to_matrix,
 )
-from app.services.ml.features import WARMUP_BARS, build_feature_rows
+from app.services.ml.features import MARKET_FEATURE_KEYS, WARMUP_BARS, build_feature_rows
 from app.services.ml.selection import ModelBundle
 from app.services.ml.train import SEQUENCE_MODEL_TYPES, train_dual_task
 from app.services.ml.walk_forward import (
@@ -163,6 +165,13 @@ def _prepare_rows(db: Session, model: PredictionModel, feature_keys: list[str], 
     )
     if not labeled:
         raise ValueError("這段期間沒有足夠的本地日K資料可以組出訓練樣本，請先回補更多歷史或調整日期區間")
+
+    # 排名只用同一天的橫斷面，不看未來，所以在切分之前做是安全的；
+    # 而且必須在切分之前做——每折各自排名的話，同一天的同一檔股票會因為
+    # 落在不同折而拿到不同的名次，那是沒有意義的
+    if model.feature_scaling == SCALING_RANK:
+        labeled = rank_normalize(labeled, feature_keys, skip=set(MARKET_FEATURE_KEYS))
+
     return labeled, bars_by_code
 
 
@@ -349,7 +358,14 @@ def _train_sync(model_id: int) -> dict:
         regressor, classifier, metrics, (scaler_mean, scaler_std), test_rows = last
 
         artifact_path = artifacts.save_bundle(
-            model.id, regressor, classifier, feature_keys, scaler_mean, scaler_std, sequence_length
+            model.id,
+            regressor,
+            classifier,
+            feature_keys,
+            scaler_mean,
+            scaler_std,
+            sequence_length,
+            model.feature_scaling,
         )
         bundle = ModelBundle(
             regressor=regressor,
@@ -358,6 +374,7 @@ def _train_sync(model_id: int) -> dict:
             scaler_mean=scaler_mean,
             scaler_std=scaler_std,
             sequence_length=sequence_length,
+            feature_scaling=model.feature_scaling,
         )
 
         from app.services.ml.train import build_data_warnings

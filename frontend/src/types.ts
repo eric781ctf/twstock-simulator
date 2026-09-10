@@ -220,6 +220,7 @@ export interface NetworkConfigInput {
 }
 export type LabelMode = "absolute" | "excess";
 export type ValidationMode = "single" | "walk_forward";
+export type FeatureScaling = "zscore" | "cross_sectional_rank";
 
 export interface WalkForwardConfigInput {
   train_months: number;
@@ -317,6 +318,7 @@ export interface ModelTrainRequest {
   threshold_percent: number;
   label_mode: LabelMode;
   validation_mode: ValidationMode;
+  feature_scaling: FeatureScaling;
   walk_forward_config?: WalkForwardConfigInput | null;
   score_weights?: { return: number; probability: number } | null;
   network_config?: NetworkConfigInput | null;
@@ -427,6 +429,8 @@ export interface ModelSummary {
   label_mode: string;
   label_mode_label: string;
   validation_mode: string;
+  feature_scaling: string;
+  feature_scaling_label: string;
   score_formula: ScoreFormula;
   training_duration_seconds: number | null;
   /** 訓練途中才有值，完成或失敗後回到 null */

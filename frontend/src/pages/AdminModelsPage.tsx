@@ -5,6 +5,7 @@ import { ConditionEditor } from "../components/ConditionEditor";
 import { useAuth } from "../auth/AuthContext";
 import type {
   Activation,
+  FeatureScaling,
   LabelMode,
   ValidationMode,
   Condition,
@@ -83,6 +84,7 @@ export default function AdminModelsPage() {
   const [threshold, setThreshold] = useState("3");
   const [labelMode, setLabelMode] = useState<LabelMode>("excess");
   const [validationMode, setValidationMode] = useState<ValidationMode>("walk_forward");
+  const [featureScaling, setFeatureScaling] = useState<FeatureScaling>("cross_sectional_rank");
   const [wfTrain, setWfTrain] = useState("6");
   const [wfValidation, setWfValidation] = useState("2");
   const [wfTest, setWfTest] = useState("2");
@@ -198,6 +200,7 @@ export default function AdminModelsPage() {
       threshold_percent: Number(threshold),
       label_mode: labelMode,
       validation_mode: validationMode,
+      feature_scaling: featureScaling,
       walk_forward_config:
         validationMode === "walk_forward"
           ? {
@@ -335,6 +338,16 @@ export default function AdminModelsPage() {
             <label>
               預測未來幾個交易日
               <input type="number" min={1} max={60} value={nDays} onChange={(e) => setNDays(e.target.value)} />
+            </label>
+            <label>
+              特徵標準化
+              <select
+                value={featureScaling}
+                onChange={(e) => setFeatureScaling(e.target.value as FeatureScaling)}
+              >
+                <option value="cross_sectional_rank">橫斷面排名</option>
+                <option value="zscore">z-score</option>
+              </select>
             </label>
             <label>
               預測目標
@@ -538,6 +551,11 @@ export default function AdminModelsPage() {
             </>
           )}
 
+          <p className="order-hint">
+            <b>特徵標準化</b>決定模型看到的數字以什麼為基準。z-score 用<b>整個訓練期</b>的平均與標準差，
+            等於拿去年的數值直接跟今年比；橫斷面排名只用<b>當天</b>的全市場，比的是「這檔今天排第幾」——
+            而那正是選股要的，極端值也自動被壓進 0~1，不用另外處理。
+          </p>
           <p className="order-hint">
             <b>預測目標</b>決定模型要學什麼。「超額報酬」是個股報酬減掉同一段期間的大盤報酬——
             大盤漲 3% 的日子幾乎每檔都達標、跌 3% 的日子幾乎每檔都不達標，用絕對報酬的話模型有

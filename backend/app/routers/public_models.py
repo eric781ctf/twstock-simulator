@@ -30,7 +30,7 @@ from app.schemas import (
     ScoringRunOut,
     WalkForwardSummaryOut,
 )
-from app.services.ml.dataset import LABEL_MODE_LABELS
+from app.services.ml.dataset import LABEL_MODE_LABELS, SCALING_MODE_LABELS
 from app.services.ml.exit_rules import net_return_percent
 from app.services.ml.features import FEATURE_KEYS, FEATURE_LABELS
 from app.services.ml.selection import TOP_N
@@ -92,6 +92,8 @@ def _summary(model: PredictionModel, stats: dict) -> ModelSummaryOut:
         label_mode=model.label_mode,
         label_mode_label=LABEL_MODE_LABELS.get(model.label_mode, model.label_mode),
         validation_mode=model.validation_mode,
+        feature_scaling=model.feature_scaling,
+        feature_scaling_label=SCALING_MODE_LABELS.get(model.feature_scaling, model.feature_scaling),
         score_formula=model.score_formula,
         training_duration_seconds=model.training_duration_seconds,
         training_progress=model.training_progress,

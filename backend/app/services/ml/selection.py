@@ -60,6 +60,8 @@ class ModelBundle:
     scaler_mean: np.ndarray
     scaler_std: np.ndarray
     sequence_length: int | None = None
+    # 訓練時用的特徵標準化方式。推論時必須用同一種，不然分布完全對不上
+    feature_scaling: str = "zscore"
 
 
 # 一次推論的最大筆數。回測時 save_predictions 會一口氣丟進近十萬列，序列模型

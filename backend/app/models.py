@@ -290,6 +290,9 @@ class PredictionModel(Base):
     validation_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="single")
     # 滾動視窗的各段月數與步長
     walk_forward_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # 特徵標準化方式：zscore（用訓練期的平均/標準差）或
+    # cross_sectional_rank（每天換算成全市場分位數）
+    feature_scaling: Mapped[str] = mapped_column(String(30), nullable=False, default="zscore")
 
     # 出場規則（四層，依序判斷，見 services/ml/exit_rules.py）
     min_hold_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
