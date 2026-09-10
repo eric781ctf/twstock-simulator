@@ -69,6 +69,12 @@ def compute_price_features(frame: pd.DataFrame) -> pd.DataFrame:
     prev_close = grouped["close"].shift(1)
     daily_return = _safe_div(close - prev_close, prev_close)
 
+    # close 留在輸出裡，但**不是特徵**：選股要拿它當進場價、回測要拿它平倉。
+    # 它之所以不該當特徵，是因為絕對價位在不同股票之間不可比——1000 元的
+    # 台積電和 20 元的股票，價格高低本身跟接下來會漲會跌沒有關係。實測把它
+    # 放進特徵時，樹模型會把它排到第一名（7.4%），最合理的解釋是拿它當
+    # 「這是哪一檔股票」的身分證在背資料，而那只會灌高訓練分數。
+    # volume 同理：單日成交股數的量級直接反映股本大小，不是可比的訊號。
     out["close"] = close
     out["volume"] = volume
     out["change_percent"] = daily_return * 100
@@ -167,8 +173,10 @@ def _streak_days(frame: pd.DataFrame, daily_return: pd.Series) -> pd.Series:
 
 
 # 這個模組負責的特徵（其餘由 features.py 的既有路徑提供）
+# 注意這裡沒有 close 與 volume——它們是輸出欄位但不是特徵，理由見上面的註解。
+# 它們的「可比版本」已經在裡面了：vma_*（量能比）、high_over_close 等等。
 PRICE_FEATURE_KEYS: list[str] = (
-    ["close", "volume", "change_percent"]
+    ["change_percent"]
     + ["kmid", "klen", "kmid2", "kup", "kup2", "klow", "klow2", "ksft", "ksft2"]
     + ["high_over_close", "low_over_close"]
     + [f"{name}_{w}" for w in WINDOWS for name in ("roc", "std", "rsqr", "cntp", "vma", "volcorr", "rsv")]

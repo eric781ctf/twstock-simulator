@@ -79,8 +79,6 @@ _ROLLING_LABELS: dict[str, str] = {
 }
 
 FEATURE_LABELS: dict[str, str] = {
-    "close": "收盤價",
-    "volume": "成交量",
     "change_percent": "當日漲跌幅",
     # K 棒形狀：全部是比例，不同價位的股票才可比
     "kmid": "K棒 實體 / 開盤價",
