@@ -248,9 +248,13 @@ def build_data_warnings(
     validation_ic = validation_metrics.get("rank_ic")
     if train_ic is not None and validation_ic is not None:
         if train_ic - validation_ic > 0.15:
+            # 只講落差本身，不要順帶斷言「沒有排序能力」——驗證分數好不好是
+            # 另一條規則在管的。實測看過驗證 Rank IC 高達 +0.074（相當好）卻
+            # 因為訓練分數更高而被這條警告說成「跟隨機選相去不遠」，那是錯的。
             warnings.append(
                 f"訓練 Rank IC（{train_ic:.3f}）遠高於驗證 Rank IC（{validation_ic:.3f}）。"
-                "模型在沒看過的資料上幾乎沒有排序能力，照它選股跟隨機選相去不遠。"
+                "模型有相當一部分能力用在記住訓練資料上，縮小模型容量或增加樣本"
+                "可能讓它更穩定。"
             )
 
     # 上面那些警告全都在講「訓練分數比驗證分數高太多」。但一個從頭到尾都很差的

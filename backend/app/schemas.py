@@ -262,6 +262,43 @@ class TreeConfigIn(BaseModel):
     min_child_samples: int = Field(default=20, ge=1, le=10000)
 
 
+class WalkForwardConfigIn(BaseModel):
+    """滾動視窗的各段月數。整段期間由六個切分日期裡的 train_start 與 test_end 決定，
+    這裡只描述「每一折長什麼樣、每次往前滾多久」。"""
+
+    train_months: int = Field(default=6, ge=1, le=60)
+    validation_months: int = Field(default=2, ge=1, le=24)
+    test_months: int = Field(default=2, ge=1, le=24)
+    step_months: int = Field(default=2, ge=1, le=24)
+
+
+class FoldMetricsOut(BaseModel):
+    """一折的切分日期與三段成績。"""
+
+    fold: dict
+    train: dict
+    validation: dict
+    test: dict
+
+
+class WalkForwardStatOut(BaseModel):
+    mean: float
+    std: float
+    min: float
+    max: float
+    positive_folds: int
+    count: int
+
+
+class WalkForwardSummaryOut(BaseModel):
+    """折間統計。標準差才是重點——平均 +0.02 但標準差 0.06 的訊號站不住腳。"""
+
+    fold_count: int
+    test_rank_ic: WalkForwardStatOut | None = None
+    test_auc: WalkForwardStatOut | None = None
+    validation_rank_ic: WalkForwardStatOut | None = None
+
+
 class ModelDeleteResultOut(BaseModel):
     """刪除結果連帶刪掉多少東西一起回報，讓 admin 看得到這次到底移除了什麼。"""
 
@@ -341,6 +378,9 @@ class ModelTrainRequest(BaseModel):
     score_weights: dict | None = None
     network_config: NetworkConfigIn | None = None
     tree_config: TreeConfigIn | None = None
+    validation_mode: Literal["single", "walk_forward"] = "single"
+    feature_scaling: Literal["zscore", "cross_sectional_rank"] = "cross_sectional_rank"
+    walk_forward_config: WalkForwardConfigIn | None = None
 
     min_hold_days: int | None = Field(default=None, ge=0, le=250)
     max_hold_days: int | None = Field(default=None, ge=1, le=250)
@@ -380,6 +420,9 @@ class ModelSummaryOut(BaseModel):
     threshold_percent: float
     label_mode: str = "absolute"
     label_mode_label: str = ""
+    validation_mode: str = "single"
+    feature_scaling: str = "zscore"
+    feature_scaling_label: str = ""
     score_formula: str
     training_duration_seconds: float | None
     # 訓練途中才有值（階段、第幾個 epoch、當下的 loss），完成或失敗後回到 None
@@ -465,7 +508,9 @@ class ModelDetailOut(BaseModel):
     test_start: date
     test_end: date
 
-    metrics: dict | None
+    metrics: dict
+    folds: list[FoldMetricsOut] = []
+    walk_forward: WalkForwardSummaryOut | None = None
     warnings: list[str]
     network: NetworkInfoOut | None
 

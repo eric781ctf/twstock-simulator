@@ -16,7 +16,8 @@ from sqlalchemy.orm import Session
 from app.models import DailyBar, Market, ModelHolding, ModelScoringRun, PredictionModel, Stock
 from app.services.ml import artifacts
 from app.services.ml.exit_rules import net_return_percent
-from app.services.ml.features import WARMUP_BARS, build_feature_rows
+from app.services.ml.dataset import SCALING_RANK, rank_normalize
+from app.services.ml.features import MARKET_FEATURE_KEYS, WARMUP_BARS, build_feature_rows
 from app.services.ml.selection import OpenPosition, run_daily_cycle
 from app.services.ml.sequences import DEFAULT_SEQUENCE_LENGTH, index_feature_rows
 from app.services.ml.train import SEQUENCE_MODEL_TYPES
@@ -82,6 +83,11 @@ def _score_one_model(
     all_rows 含今天之前那段歷史，只有序列模型會用到。
     """
     bundle = artifacts.load_bundle(model.model_artifact_path)
+
+    # 排名要在「當天全市場」上算，跟訓練時的基準一致。若只對候選股（已扣掉
+    # 手上持有的）排名，同一檔的名次會因為手上有幾檔而漂移
+    if bundle.feature_scaling == SCALING_RANK:
+        rows_today = rank_normalize(rows_today, bundle.feature_keys, skip=set(MARKET_FEATURE_KEYS))
 
     if bundle.sequence_length:
         # 每個模型的特徵欄位與順序可能不同，序列矩陣的欄位順序必須跟該模型

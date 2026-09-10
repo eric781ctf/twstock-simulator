@@ -17,6 +17,7 @@ from app.schemas import (
     BacktestTradePointOut,
     CalibrationBucketOut,
     FeatureImportanceOut,
+    FoldMetricsOut,
     FeatureOptionOut,
     ModelCatalogOut,
     ModelDetailOut,
@@ -27,8 +28,9 @@ from app.schemas import (
     NetworkInfoOut,
     ScoreFormulaInfoOut,
     ScoringRunOut,
+    WalkForwardSummaryOut,
 )
-from app.services.ml.dataset import LABEL_MODE_LABELS
+from app.services.ml.dataset import LABEL_MODE_LABELS, SCALING_MODE_LABELS
 from app.services.ml.exit_rules import net_return_percent
 from app.services.ml.features import FEATURE_KEYS, FEATURE_LABELS
 from app.services.ml.selection import TOP_N
@@ -89,6 +91,9 @@ def _summary(model: PredictionModel, stats: dict) -> ModelSummaryOut:
         threshold_percent=model.threshold_percent,
         label_mode=model.label_mode,
         label_mode_label=LABEL_MODE_LABELS.get(model.label_mode, model.label_mode),
+        validation_mode=model.validation_mode,
+        feature_scaling=model.feature_scaling,
+        feature_scaling_label=SCALING_MODE_LABELS.get(model.feature_scaling, model.feature_scaling),
         score_formula=model.score_formula,
         training_duration_seconds=model.training_duration_seconds,
         training_progress=model.training_progress,
@@ -260,6 +265,10 @@ def get_public_model(model_id: int, db: Session = Depends(get_db)):
         test_start=model.test_start,
         test_end=model.test_end,
         metrics=metrics,
+        folds=[FoldMetricsOut(**f) for f in metrics.get('folds', [])],
+        walk_forward=(
+            WalkForwardSummaryOut(**metrics['walk_forward']) if metrics.get('walk_forward') else None
+        ),
         warnings=metrics.get("warnings", []),
         network=NetworkInfoOut(**metrics["network"]) if metrics.get("network") else None,
         regression_points=regression_points,

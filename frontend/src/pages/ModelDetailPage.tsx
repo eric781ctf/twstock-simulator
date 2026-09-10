@@ -212,6 +212,80 @@ export default function ModelDetailPage() {
         </p>
       </div>
 
+      {detail.walk_forward && detail.folds.length > 0 && (
+        <>
+          <h2 className="section-title">滾動驗證（{detail.walk_forward.fold_count} 折）</h2>
+          <div className="panel">
+            <p className="order-hint">
+              同一組設定在多段不同時期各測一次。<b>標準差比平均更重要</b>——
+              平均值再漂亮，只要折與折之間跳得比平均還大，那個數字就站不住腳。
+            </p>
+
+            <div className="backtest-stats-grid">
+              {(
+                [
+                  ["測試 Rank IC", detail.walk_forward.test_rank_ic, 4],
+                  ["測試 AUC", detail.walk_forward.test_auc, 4],
+                  ["驗證 Rank IC", detail.walk_forward.validation_rank_ic, 4],
+                ] as const
+              ).map(([label, stat, digits]) =>
+                stat ? (
+                  <div className="stat" key={label}>
+                    <span className="label">{label}</span>
+                    <span className={`value ${cls(stat.mean)}`}>
+                      {stat.mean >= 0 ? "+" : ""}
+                      {stat.mean.toFixed(digits)}
+                    </span>
+                    <span className="label">
+                      ± {stat.std.toFixed(digits)}　{stat.positive_folds}/{stat.count} 折為正
+                    </span>
+                  </div>
+                ) : null
+              )}
+            </div>
+
+            <h3 className="tutorial-heading">每一折</h3>
+            <div className="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>折</th>
+                    <th>訓練期</th>
+                    <th>測試期</th>
+                    <th>訓練 IC</th>
+                    <th>驗證 IC</th>
+                    <th>測試 IC</th>
+                    <th>測試 AUC</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {detail.folds.map((f) => (
+                    <tr key={f.fold.index}>
+                      <td>{f.fold.index}</td>
+                      <td>
+                        {f.fold.train_start} ~ {f.fold.train_end}
+                      </td>
+                      <td>
+                        {f.fold.test_start} ~ {f.fold.test_end}
+                      </td>
+                      <td>{num(f.train.rank_ic, 4)}</td>
+                      <td>{num(f.validation.rank_ic, 4)}</td>
+                      <td className={cls(f.test.rank_ic)}>{num(f.test.rank_ic, 4)}</td>
+                      <td>{num(f.test.auc, 4)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="order-hint">
+              折與折之間的訓練期高度重疊（每次只往前滾幾個月），所以這不等於幾次完全獨立的驗證，
+              但已經比單一次固定切分可信得多。下方的圖表與回測用的是<b>最後一折</b>——
+              它是用最近的資料訓練的，也就是真的會被拿去每日選股的那一個。
+            </p>
+          </div>
+        </>
+      )}
+
       <h2 className="section-title">模型準確度</h2>
       <div className="panel">
         <h3 className="tutorial-heading">
