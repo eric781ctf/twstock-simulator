@@ -356,6 +356,38 @@ class ChipDaily(Base):
     foreign_holding_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
+class ShareholdingWeekly(Base):
+    """集保戶股權分散表的每週快照，已收斂成散戶／中實戶／大戶三組。
+
+    原始資料每檔股票有 17 個持股分級，但特徵真正用得到的是「籌碼集中在誰手上」，
+    所以入庫時就聚合掉——存 17 個分級只是把同一個判斷推遲到查詢時做。
+    分級 17 是「合計」列，聚合時排除，不然每個比例都會變成兩倍。
+
+    週頻資料（每週五快照，隔天發布）。特徵那邊要用「日期嚴格早於特徵日」的
+    最後一筆，否則會在週五當天看到還沒公布的數字。
+    """
+
+    __tablename__ = "shareholding_weekly"
+    __table_args__ = (
+        UniqueConstraint("stock_code", "as_of_date", name="uq_shareholding_code_date"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    stock_code: Mapped[str] = mapped_column(ForeignKey("stocks.code"), nullable=False, index=True)
+    as_of_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+
+    total_holders: Mapped[int] = mapped_column(Integer, nullable=False)
+    # 散戶：不到 10 張
+    retail_holders: Mapped[int] = mapped_column(Integer, nullable=False)
+    retail_share_percent: Mapped[float] = mapped_column(Float, nullable=False)
+    # 中實戶：400~800 張
+    mid_holders: Mapped[int] = mapped_column(Integer, nullable=False)
+    mid_share_percent: Mapped[float] = mapped_column(Float, nullable=False)
+    # 大戶：超過 1000 張
+    big_holders: Mapped[int] = mapped_column(Integer, nullable=False)
+    big_share_percent: Mapped[float] = mapped_column(Float, nullable=False)
+
+
 class ModelScoringRun(Base):
     """每個模型每一天跑選股/出場判斷的執行紀錄，主要是為了記錄耗時，順便當成
     每日排程的稽核軌跡（哪天跑了、成功還失敗）。"""

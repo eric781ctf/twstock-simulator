@@ -11,13 +11,13 @@
 
 import logging
 from collections import defaultdict
-from datetime import date
+from datetime import date, timedelta
 
 import numpy as np
 import pandas as pd
 from sqlalchemy.orm import Session
 
-from app.models import ChipDaily, DailyBar, Market, Stock, StockValuationHistory
+from app.models import ChipDaily, DailyBar, Market, ShareholdingWeekly, Stock, StockValuationHistory
 from app.services.indicators import compute_kd_series
 from app.services.ml.price_features import (
     PRICE_FEATURE_KEYS,
@@ -61,6 +61,21 @@ CHIP_FEATURE_KEYS = [
     "foreign_holding_change_20d",
 ]
 
+# 股權分散（集保）：籌碼集中在誰手上。台股散戶佔比高，籌碼從散戶流向大戶
+# 長期被視為看多訊號——這幾個特徵就是在量那個流向。
+SHAREHOLDING_FEATURE_KEYS = [
+    "big_holder_share_percent",
+    "big_holder_share_change_4w",
+    "retail_holder_share_percent",
+    "retail_holder_count_change_4w",
+    "mid_holder_share_change_4w",
+    # 連續幾週同方向。跟 4 週淨變化是不同的東西：淨變化 +0.5 個百分點可能是
+    # 「一週大漲、三週小跌」，也可能是「連四週穩定流入」，後者才是籌碼真的在
+    # 集中。原始 side project 篩的正是「散戶連續遞減且大戶連續遞增」。
+    "big_holder_share_streak",
+    "retail_holder_count_streak",
+]
+
 FEATURE_KEYS = (
     PRICE_FEATURE_KEYS
     + _KD_FEATURE_KEYS
@@ -68,6 +83,7 @@ FEATURE_KEYS = (
     + MARKET_FEATURE_KEYS
     + _RELATIVE_FEATURE_KEYS
     + CHIP_FEATURE_KEYS
+    + SHAREHOLDING_FEATURE_KEYS
 )
 
 # 滾動類特徵是「運算子 × 視窗」的組合，標籤跟著組出來就好——手寫 28 個
@@ -123,6 +139,13 @@ FEATURE_LABELS: dict[str, str] = {
     "margin_change_5d": "融資餘額近 5 日變化率",
     "foreign_holding_ratio": "外資持股比率（%）",
     "foreign_holding_change_20d": "外資持股比率近 20 日增減（百分點）",
+    "big_holder_share_percent": "大戶（>1000張）持股比例 %",
+    "big_holder_share_change_4w": "大戶持股比例近 4 週增減（百分點）",
+    "retail_holder_share_percent": "散戶（<10張）持股比例 %",
+    "retail_holder_count_change_4w": "散戶人數近 4 週變化率 %",
+    "mid_holder_share_change_4w": "中實戶（400~800張）持股比例近 4 週增減",
+    "big_holder_share_streak": "大戶持股比例連續增減週數（增為正、減為負）",
+    "retail_holder_count_streak": "散戶人數連續增減週數（增為正、減為負）",
 }
 
 for _window in WINDOWS:
@@ -282,6 +305,100 @@ def market_levels(series: dict[date, dict]) -> dict[date, float]:
 
 
 
+def _weekly_streak(weekly: pd.DataFrame, column: str) -> pd.Series:
+    """連續同方向的週數（增為正、減為負、持平歸零）。
+
+    跟 _streak_days 同一個手法：方向一改變就開一個新的段，段內累計次數就是
+    連續週數。這裡多一個「換股票就斷開」的條件——不然一檔的結尾會接到下一檔
+    的開頭，算出一段跨股票的假連續。
+    """
+    direction = np.sign(weekly.groupby("stock_code", sort=False)[column].diff().fillna(0)).astype(int)
+    changed = (direction != direction.shift(1)) | (
+        weekly["stock_code"] != weekly["stock_code"].shift(1)
+    )
+    length = direction.groupby(changed.cumsum()).cumcount() + 1
+    return (length * direction).astype(float)
+
+
+def _attach_shareholding(combined: pd.DataFrame, db: Session, start: date, end: date) -> pd.DataFrame:
+    """股權分散表是週頻，用「日期**嚴格早於**特徵日」的最後一筆往前填。
+
+    嚴格早於是關鍵：TDCC 的週五快照要到週六才發布，用 <= 會讓週五當天的特徵
+    看到當天還沒公布的資料——那是最典型的 look-ahead，而且回測會因此變好看。
+    merge_asof 的 allow_exact_matches=False 就是這個語意。
+
+    4 週變化取「跟 4 筆之前的快照相比」。持股比例是百分比，取相減（百分點）；
+    人數跨股票差好幾個數量級，取變化率。
+    """
+    rows = (
+        db.query(
+            ShareholdingWeekly.stock_code,
+            ShareholdingWeekly.as_of_date,
+            ShareholdingWeekly.big_share_percent,
+            ShareholdingWeekly.retail_share_percent,
+            ShareholdingWeekly.retail_holders,
+            ShareholdingWeekly.mid_share_percent,
+        )
+        # 往前多抓一段，4 週變化才算得出來
+        .filter(ShareholdingWeekly.as_of_date >= start - timedelta(days=45))
+        .filter(ShareholdingWeekly.as_of_date <= end)
+        .all()
+    )
+    if not rows:
+        for key in SHAREHOLDING_FEATURE_KEYS:
+            combined[key] = None
+        return combined
+
+    weekly = pd.DataFrame.from_records(
+        list(rows),
+        columns=[
+            "stock_code",
+            "as_of_date",
+            "big_holder_share_percent",
+            "retail_holder_share_percent",
+            "retail_holders",
+            "mid_share_percent",
+        ],
+    )
+    weekly.sort_values(["stock_code", "as_of_date"], inplace=True)
+    grouped = weekly.groupby("stock_code", sort=False)
+    position = grouped.cumcount().to_numpy()
+
+    weekly["big_holder_share_change_4w"] = (
+        weekly["big_holder_share_percent"] - grouped["big_holder_share_percent"].shift(4)
+    ).where(position >= 4)
+    weekly["mid_holder_share_change_4w"] = (
+        weekly["mid_share_percent"] - grouped["mid_share_percent"].shift(4)
+    ).where(position >= 4)
+    past_holders = grouped["retail_holders"].shift(4)
+    weekly["retail_holder_count_change_4w"] = (
+        (weekly["retail_holders"] - past_holders) / past_holders.replace(0, np.nan) * 100
+    ).where(position >= 4)
+
+    weekly["big_holder_share_streak"] = _weekly_streak(weekly, "big_holder_share_percent")
+    weekly["retail_holder_count_streak"] = _weekly_streak(weekly, "retail_holders")
+
+    # .copy()：上一行的欄位選取回傳的是切片，直接改會觸發 SettingWithCopyWarning
+    weekly = weekly[["stock_code", "as_of_date"] + SHAREHOLDING_FEATURE_KEYS].copy()
+    weekly["as_of_date"] = pd.to_datetime(weekly["as_of_date"])
+    weekly.sort_values(["as_of_date", "stock_code"], inplace=True)
+
+    left = combined.copy()
+    left["as_of_date"] = pd.to_datetime(left["as_of_date"])
+    left.sort_values(["as_of_date", "stock_code"], inplace=True)
+
+    merged = pd.merge_asof(
+        left,
+        weekly,
+        on="as_of_date",
+        by="stock_code",
+        direction="backward",
+        allow_exact_matches=False,
+    )
+    merged["as_of_date"] = merged["as_of_date"].dt.date
+    return merged.sort_values(["stock_code", "as_of_date"]).reset_index(drop=True)
+
+
 def build_feature_rows(
     db: Session,
     fetch_start: date,
@@ -325,6 +442,7 @@ def build_feature_rows(
     combined = _attach_valuations(combined, db, fetch_start, fetch_end)
     combined = _attach_market(combined, build_market_series(bars_by_code))
     combined = _attach_chips(combined, db, fetch_start, fetch_end, frame)
+    combined = _attach_shareholding(combined, db, fetch_start, fetch_end)
 
     # NaN 要換成 None：下游用 `value is None` 判斷缺值，NaN 會被當成有值
     combined = combined.astype(object).where(pd.notna(combined), None)
