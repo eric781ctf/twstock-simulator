@@ -82,6 +82,7 @@ def _to_summary(model: PredictionModel, stats: dict) -> ModelSummaryOut:
         threshold_percent=model.threshold_percent,
         label_mode=model.label_mode,
         label_mode_label=LABEL_MODE_LABELS.get(model.label_mode, model.label_mode),
+        validation_mode=model.validation_mode,
         score_formula=model.score_formula,
         training_duration_seconds=model.training_duration_seconds,
         training_progress=model.training_progress,
@@ -133,6 +134,10 @@ async def create_model(
         score_weights=payload.score_weights,
         network_config=payload.network_config.model_dump() if payload.network_config else None,
         tree_config=payload.tree_config.model_dump() if payload.tree_config else None,
+        validation_mode=payload.validation_mode,
+        walk_forward_config=(
+            payload.walk_forward_config.model_dump() if payload.walk_forward_config else None
+        ),
         min_hold_days=payload.min_hold_days,
         max_hold_days=payload.max_hold_days,
         stop_loss_percent=payload.stop_loss_percent,

@@ -34,6 +34,18 @@ from app.services.ml.dataset import (
 from app.services.ml.features import WARMUP_BARS, build_feature_rows
 from app.services.ml.selection import ModelBundle
 from app.services.ml.train import SEQUENCE_MODEL_TYPES, train_dual_task
+from app.services.ml.walk_forward import (
+    DEFAULT_STEP_MONTHS,
+    DEFAULT_TEST_MONTHS,
+    DEFAULT_TRAIN_MONTHS,
+    DEFAULT_VALIDATION_MONTHS,
+    Fold,
+    generate_folds,
+    summarize_folds,
+)
+
+VALIDATION_SINGLE = "single"
+VALIDATION_WALK_FORWARD = "walk_forward"
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +130,184 @@ def _progress_writer(db: Session, model_id: int):
     return write
 
 
+def _prepare_rows(db: Session, model: PredictionModel, feature_keys: list[str], sequence_length: int | None):
+    """把整段期間的特徵與 label 一次算好。
+
+    走 walk-forward 時這一步刻意只做一次：每一折的差別只在「拿哪一段當訓練、
+    哪一段當測試」，特徵本身完全相同。每折各算一次會把一次執行從幾分鐘拖成
+    半小時，而且算出來的東西一模一樣。
+    """
+    feature_start = model.train_start
+    if sequence_length:
+        # 序列模型要能回頭看 T 天，特徵列得從訓練起始日之前就開始產出
+        feature_start -= timedelta(days=int(sequence_length * TRADING_DAY_TO_CALENDAR) + 7)
+
+    fetch_start = feature_start - timedelta(days=WARMUP_CALENDAR_DAYS)
+    rows, bars_by_code = build_feature_rows(db, fetch_start, model.test_end, feature_start)
+
+    if sequence_length:
+        from app.services.ml.sequences import index_feature_rows
+
+        index_feature_rows(rows, feature_keys)
+
+    from app.services.ml.features import build_market_series, market_levels
+
+    levels = market_levels(build_market_series(bars_by_code)) if model.label_mode == "excess" else None
+    labeled = attach_labels(
+        rows,
+        bars_by_code,
+        model.n_days,
+        model.threshold_percent,
+        label_mode=model.label_mode,
+        market_levels=levels,
+    )
+    if not labeled:
+        raise ValueError("這段期間沒有足夠的本地日K資料可以組出訓練樣本，請先回補更多歷史或調整日期區間")
+    return labeled, bars_by_code
+
+
+def _split_fold(labeled: list[dict], fold: Fold, sequence_length: int | None):
+    """依一折的六個日期界線切出三段，並回報哪一段是空的。"""
+    train_rows = split_by_date(labeled, fold.train_start, fold.train_end)
+    validation_rows = split_by_date(labeled, fold.validation_start, fold.validation_end)
+    test_rows = split_by_date(labeled, fold.test_start, fold.test_end)
+
+    if sequence_length:
+        from app.services.ml.sequences import filter_rows_with_history
+
+        train_rows = filter_rows_with_history(train_rows, sequence_length)
+        validation_rows = filter_rows_with_history(validation_rows, sequence_length)
+        test_rows = filter_rows_with_history(test_rows, sequence_length)
+
+    empty = [
+        name
+        for name, rows in (("訓練", train_rows), ("驗證", validation_rows), ("測試", test_rows))
+        if not rows
+    ]
+    return train_rows, validation_rows, test_rows, empty
+
+
+def _build_matrices(rows: list[dict], feature_keys: list[str], sequence_length: int | None):
+    """回傳 (X_raw, y_迴歸, y_分類)。序列模型的 X 多一個時間維度。"""
+    if sequence_length:
+        from app.services.ml.sequences import stack_sequences
+
+        y_reg, y_clf = _labels(rows)
+        return stack_sequences(rows, sequence_length), y_reg, y_clf
+    return to_matrix(rows, feature_keys)
+
+
+def _train_one_fold(
+    model: PredictionModel,
+    feature_keys: list[str],
+    sequence_length: int | None,
+    labeled: list[dict],
+    fold: Fold,
+    progress,
+    fold_note: dict,
+):
+    """訓練一折並回傳 (迴歸模型, 分類模型, metrics, 標準化參數, 測試列)。"""
+    train_rows, validation_rows, test_rows, empty = _split_fold(labeled, fold, sequence_length)
+    if empty:
+        raise ValueError(f"第 {fold.index} 折的{'、'.join(empty)}區間沒有任何樣本，請調整日期或先回補更多歷史")
+
+    x_train_raw, y_train_reg, y_train_clf = _build_matrices(train_rows, feature_keys, sequence_length)
+    x_validation_raw, y_validation_reg, y_validation_clf = _build_matrices(
+        validation_rows, feature_keys, sequence_length
+    )
+
+    # 標準化參數只用這一折的訓練集算。折與折之間不共用——共用等於讓後面的
+    # 折看到前面折的分布，正是 walk-forward 要避免的事
+    fit = fit_scaler_sequences if sequence_length else fit_scaler
+    scaler_mean, scaler_std = fit(x_train_raw)
+    x_train = apply_scaler(x_train_raw, scaler_mean, scaler_std)
+    x_validation = apply_scaler(x_validation_raw, scaler_mean, scaler_std)
+
+    progress("training", {**fold_note, "epoch": 0, "total_epochs": (model.network_config or {}).get("epochs")})
+    regressor, classifier, metrics = train_dual_task(
+        model.model_type,
+        feature_keys,
+        x_train,
+        y_train_reg,
+        y_train_clf,
+        x_validation,
+        y_validation_reg,
+        y_validation_clf,
+        network_config=model.network_config,
+        tree_config=model.tree_config,
+        on_epoch_end=lambda info: progress("training", {**fold_note, **info}),
+    )
+
+    from app.services.ml.train import evaluate
+
+    x_test_raw, y_test_reg, y_test_clf = _build_matrices(test_rows, feature_keys, sequence_length)
+    x_test = apply_scaler(x_test_raw, scaler_mean, scaler_std)
+    metrics["test"] = evaluate(regressor, classifier, x_test, y_test_reg, y_test_clf)
+    metrics["fold"] = fold.as_dict()
+
+    del x_train, x_validation, x_test, x_train_raw, x_validation_raw, x_test_raw
+    return regressor, classifier, metrics, (scaler_mean, scaler_std), test_rows
+
+
+def _folds_for(model: PredictionModel) -> list[Fold]:
+    """單次切分就是「只有一折」，走的是同一條程式碼路徑。"""
+    if model.validation_mode != VALIDATION_WALK_FORWARD:
+        return [
+            Fold(
+                index=1,
+                train_start=model.train_start,
+                train_end=model.train_end,
+                validation_start=model.validation_start,
+                validation_end=model.validation_end,
+                test_start=model.test_start,
+                test_end=model.test_end,
+            )
+        ]
+
+    config = model.walk_forward_config or {}
+    folds = generate_folds(
+        model.train_start,
+        model.test_end,
+        train_months=int(config.get("train_months", DEFAULT_TRAIN_MONTHS)),
+        validation_months=int(config.get("validation_months", DEFAULT_VALIDATION_MONTHS)),
+        test_months=int(config.get("test_months", DEFAULT_TEST_MONTHS)),
+        step_months=int(config.get("step_months", DEFAULT_STEP_MONTHS)),
+    )
+    if not folds:
+        raise ValueError(
+            "這段期間排不下任何一折。整段長度至少要是「訓練 + 驗證 + 測試」的月數總和，"
+            "請把起訖日期拉長或把各段月數調小"
+        )
+    return folds
+
+
+def _walk_forward_warnings(summary: dict) -> list[str]:
+    """滾動驗證才問得出來的問題：這個數字到底站不站得住腳。"""
+    warnings: list[str] = []
+    stats = summary.get("test_rank_ic")
+    if not stats:
+        return warnings
+
+    mean, std = stats["mean"], stats["std"]
+    positive, count = stats["positive_folds"], stats["count"]
+
+    # 標準差比平均還大，代表折與折之間的差距完全蓋過了平均值本身。
+    # 這正是單次切分看不出來、但會讓人誤以為模型有效的情況。
+    if std > abs(mean):
+        warnings.append(
+            f"測試 Rank IC 的折間標準差（{std:.3f}）大於平均值（{mean:+.3f}），"
+            f"{count} 折裡只有 {positive} 折是正的。這個平均值站不住腳——"
+            "換一段測試期就可能翻正負號，不能當作模型有效的證據。"
+        )
+    elif positive == count and mean > 0:
+        warnings.append(
+            f"{count} 折的測試 Rank IC 全部為正（平均 {mean:+.3f}、標準差 {std:.3f}）。"
+            "這是目前為止最接近「穩定訊號」的結果，但折與折之間的訓練期高度重疊，"
+            "仍不等於獨立的多次驗證。"
+        )
+    return warnings
+
+
 def _train_sync(model_id: int) -> dict:
     """真正做事的地方，跑在獨立的 process 裡，所以自己開資料庫連線。"""
     db: Session = SessionLocal()
@@ -136,88 +326,27 @@ def _train_sync(model_id: int) -> dict:
 
         feature_keys = list(model.feature_config)
         sequence_length = _sequence_length_for(model)
+        labeled, bars_by_code = _prepare_rows(db, model, feature_keys, sequence_length)
+        folds = _folds_for(model)
 
-        # 序列模型要能回頭看 T 天，所以特徵列得從訓練起始日之前就開始產出——
-        # 不然訓練期最前面那 T-1 天會因為湊不出完整視窗而整批被丟掉。
-        feature_start = model.train_start
-        if sequence_length:
-            feature_start -= timedelta(days=int(sequence_length * TRADING_DAY_TO_CALENDAR) + 7)
+        fold_metrics: list[dict] = []
+        last = None
+        for fold in folds:
+            note = {"fold": fold.index, "total_folds": len(folds)} if len(folds) > 1 else {}
+            outcome = _train_one_fold(
+                model, feature_keys, sequence_length, labeled, fold, progress, note
+            )
+            fold_metrics.append(outcome[2])
+            last = outcome
+            logger.info(
+                "模型 %d 第 %d/%d 折完成：測試 RankIC=%s",
+                model_id,
+                fold.index,
+                len(folds),
+                outcome[2]["test"]["rank_ic"],
+            )
 
-        fetch_start = feature_start - timedelta(days=WARMUP_CALENDAR_DAYS)
-        rows, bars_by_code = build_feature_rows(db, fetch_start, model.test_end, feature_start)
-
-        if sequence_length:
-            # 索引要在切分之前、對「完整的」特徵列做，早於訓練起始日的那些列
-            # 不會成為訓練目標，但要留著當歷史用
-            from app.services.ml.sequences import index_feature_rows
-
-            index_feature_rows(rows, feature_keys)
-
-        # 超額報酬要用大盤水位，跟特徵那邊算的是同一份等權合成指數
-        from app.services.ml.features import build_market_series, market_levels
-
-        levels = market_levels(build_market_series(bars_by_code)) if model.label_mode == "excess" else None
-        labeled = attach_labels(
-            rows,
-            bars_by_code,
-            model.n_days,
-            model.threshold_percent,
-            label_mode=model.label_mode,
-            market_levels=levels,
-        )
-        if not labeled:
-            raise ValueError("這段期間沒有足夠的本地日K資料可以組出訓練樣本，請先回補更多歷史或調整日期區間")
-
-        train_rows = split_by_date(labeled, model.train_start, model.train_end)
-        validation_rows = split_by_date(labeled, model.validation_start, model.validation_end)
-        test_rows = split_by_date(labeled, model.test_start, model.test_end)
-
-        if sequence_length:
-            from app.services.ml.sequences import filter_rows_with_history
-
-            train_rows = filter_rows_with_history(train_rows, sequence_length)
-            validation_rows = filter_rows_with_history(validation_rows, sequence_length)
-            test_rows = filter_rows_with_history(test_rows, sequence_length)
-
-        if not train_rows:
-            raise ValueError("訓練區間沒有任何樣本，請往前調整訓練起始日或先回補更多歷史")
-        if not validation_rows:
-            raise ValueError("驗證區間沒有任何樣本，請調整驗證日期區間")
-        if not test_rows:
-            raise ValueError("測試區間沒有任何樣本，請調整測試日期區間")
-
-        y_train_reg, y_train_clf = _labels(train_rows)
-        y_validation_reg, y_validation_clf = _labels(validation_rows)
-
-        # 標準化參數只用訓練集算，再套用到驗證/測試，避免測試集的分布洩漏進訓練
-        if sequence_length:
-            from app.services.ml.sequences import stack_sequences
-
-            x_train_raw = stack_sequences(train_rows, sequence_length)
-            x_validation_raw = stack_sequences(validation_rows, sequence_length)
-            scaler_mean, scaler_std = fit_scaler_sequences(x_train_raw)
-        else:
-            x_train_raw, y_train_reg, y_train_clf = to_matrix(train_rows, feature_keys)
-            x_validation_raw, y_validation_reg, y_validation_clf = to_matrix(validation_rows, feature_keys)
-            scaler_mean, scaler_std = fit_scaler(x_train_raw)
-
-        x_train = apply_scaler(x_train_raw, scaler_mean, scaler_std)
-        x_validation = apply_scaler(x_validation_raw, scaler_mean, scaler_std)
-
-        progress("training", {"epoch": 0, "total_epochs": (model.network_config or {}).get("epochs")})
-        regressor, classifier, metrics = train_dual_task(
-            model.model_type,
-            feature_keys,
-            x_train,
-            y_train_reg,
-            y_train_clf,
-            x_validation,
-            y_validation_reg,
-            y_validation_clf,
-            network_config=model.network_config,
-            tree_config=model.tree_config,
-            on_epoch_end=lambda info: progress("training", info),
-        )
+        regressor, classifier, metrics, (scaler_mean, scaler_std), test_rows = last
 
         artifact_path = artifacts.save_bundle(
             model.id, regressor, classifier, feature_keys, scaler_mean, scaler_std, sequence_length
@@ -231,24 +360,24 @@ def _train_sync(model_id: int) -> dict:
             sequence_length=sequence_length,
         )
 
-        from app.services.ml.train import build_data_warnings, evaluate
+        from app.services.ml.train import build_data_warnings
 
-        if sequence_length:
-            from app.services.ml.sequences import stack_sequences
-
-            y_test_reg, y_test_clf = _labels(test_rows)
-            x_test_raw = stack_sequences(test_rows, sequence_length)
-        else:
-            x_test_raw, y_test_reg, y_test_clf = to_matrix(test_rows, feature_keys)
-        x_test = apply_scaler(x_test_raw, scaler_mean, scaler_std)
-        metrics["test"] = evaluate(regressor, classifier, x_test, y_test_reg, y_test_clf)
-        del x_train, x_validation, x_test, x_train_raw, x_validation_raw, x_test_raw
-
+        # 回測只跑最後一折。它是用最近的資料訓練的，也就是真的會被拿去上線的
+        # 那一個；其餘折的價值在於 Rank IC 的穩定度，不需要各自跑一次回測
+        # （每折回測要多花兩分半，而它回答的不是「這個改動有沒有效」）。
         progress("backtesting")
         metrics["backtest"] = run_backtest(db, model, bundle, test_rows, bars_by_code)
         metrics["warnings"] = build_data_warnings(
             metrics["train"], metrics["validation"], metrics["test"], metrics.get("network")
         )
+
+        if len(folds) > 1:
+            metrics["folds"] = [
+                {"fold": m["fold"], "train": m["train"], "validation": m["validation"], "test": m["test"]}
+                for m in fold_metrics
+            ]
+            metrics["walk_forward"] = summarize_folds(fold_metrics)
+            metrics["warnings"] = metrics["warnings"] + _walk_forward_warnings(metrics["walk_forward"])
 
         model.metrics = metrics
         model.model_artifact_path = artifact_path
@@ -257,7 +386,9 @@ def _train_sync(model_id: int) -> dict:
         model.trained_at = datetime.now(TAIPEI_TZ)
         model.training_duration_seconds = time.perf_counter() - started
         db.commit()
-        logger.info("模型 %d 訓練完成，耗時 %.1f 秒", model_id, model.training_duration_seconds)
+        logger.info(
+            "模型 %d 訓練完成（%d 折），耗時 %.1f 秒", model_id, len(folds), model.training_duration_seconds
+        )
         return {"status": "completed", "model_id": model_id}
 
     except Exception as e:

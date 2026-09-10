@@ -219,6 +219,46 @@ export interface NetworkConfigInput {
   batch_size: number;
 }
 export type LabelMode = "absolute" | "excess";
+export type ValidationMode = "single" | "walk_forward";
+
+export interface WalkForwardConfigInput {
+  train_months: number;
+  validation_months: number;
+  test_months: number;
+  step_months: number;
+}
+
+export interface WalkForwardStat {
+  mean: number;
+  std: number;
+  min: number;
+  max: number;
+  positive_folds: number;
+  count: number;
+}
+
+export interface WalkForwardSummary {
+  fold_count: number;
+  test_rank_ic: WalkForwardStat | null;
+  test_auc: WalkForwardStat | null;
+  validation_rank_ic: WalkForwardStat | null;
+}
+
+export interface FoldMetrics {
+  fold: {
+    index: number;
+    train_start: string;
+    train_end: string;
+    validation_start: string;
+    validation_end: string;
+    test_start: string;
+    test_end: string;
+  };
+  train: Record<string, number | null>;
+  validation: Record<string, number | null>;
+  test: Record<string, number | null>;
+}
+
 export type ScoreFormula = "multiply" | "zscore_weighted";
 export type ModelStatus = "queued" | "training" | "completed" | "failed";
 
@@ -276,6 +316,8 @@ export interface ModelTrainRequest {
   n_days: number;
   threshold_percent: number;
   label_mode: LabelMode;
+  validation_mode: ValidationMode;
+  walk_forward_config?: WalkForwardConfigInput | null;
   score_weights?: { return: number; probability: number } | null;
   network_config?: NetworkConfigInput | null;
   tree_config?: TreeConfigInput | null;
@@ -358,6 +400,8 @@ export interface ModelDetail {
   test_start: string;
   test_end: string;
   metrics: Record<string, any> | null;
+  folds: FoldMetrics[];
+  walk_forward: WalkForwardSummary | null;
   warnings: string[];
   network: NetworkInfo | null;
   regression_points: ModelPredictionPoint[];
@@ -382,6 +426,7 @@ export interface ModelSummary {
   threshold_percent: number;
   label_mode: string;
   label_mode_label: string;
+  validation_mode: string;
   score_formula: ScoreFormula;
   training_duration_seconds: number | null;
   /** 訓練途中才有值，完成或失敗後回到 null */

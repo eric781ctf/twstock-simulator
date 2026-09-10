@@ -6,6 +6,7 @@ import { useAuth } from "../auth/AuthContext";
 import type {
   Activation,
   LabelMode,
+  ValidationMode,
   Condition,
   ModelSummary,
   ModelTrainRequest,
@@ -81,6 +82,11 @@ export default function AdminModelsPage() {
   const [nDays, setNDays] = useState("5");
   const [threshold, setThreshold] = useState("3");
   const [labelMode, setLabelMode] = useState<LabelMode>("excess");
+  const [validationMode, setValidationMode] = useState<ValidationMode>("walk_forward");
+  const [wfTrain, setWfTrain] = useState("6");
+  const [wfValidation, setWfValidation] = useState("2");
+  const [wfTest, setWfTest] = useState("2");
+  const [wfStep, setWfStep] = useState("2");
   const [returnWeight, setReturnWeight] = useState("0.5");
   const [probabilityWeight, setProbabilityWeight] = useState("0.5");
   const [minHold, setMinHold] = useState("2");
@@ -191,6 +197,16 @@ export default function AdminModelsPage() {
       n_days: Number(nDays),
       threshold_percent: Number(threshold),
       label_mode: labelMode,
+      validation_mode: validationMode,
+      walk_forward_config:
+        validationMode === "walk_forward"
+          ? {
+              train_months: Number(wfTrain),
+              validation_months: Number(wfValidation),
+              test_months: Number(wfTest),
+              step_months: Number(wfStep),
+            }
+          : null,
       score_weights: { return: Number(returnWeight), probability: Number(probabilityWeight) },
       network_config: isNeural
         ? {
@@ -565,6 +581,62 @@ export default function AdminModelsPage() {
               </label>
             ))}
           </div>
+
+          <h3 className="tutorial-heading">驗證方式</h3>
+          <div className="strategy-form-grid">
+            <label>
+              模式
+              <select
+                value={validationMode}
+                onChange={(e) => setValidationMode(e.target.value as ValidationMode)}
+              >
+                <option value="walk_forward">滾動視窗（多折）</option>
+                <option value="single">單次切分</option>
+              </select>
+            </label>
+            {validationMode === "walk_forward" && (
+              <>
+                <label>
+                  訓練月數
+                  <input type="number" min={1} max={60} value={wfTrain} onChange={(e) => setWfTrain(e.target.value)} />
+                </label>
+                <label>
+                  驗證月數
+                  <input
+                    type="number"
+                    min={1}
+                    max={24}
+                    value={wfValidation}
+                    onChange={(e) => setWfValidation(e.target.value)}
+                  />
+                </label>
+                <label>
+                  測試月數
+                  <input type="number" min={1} max={24} value={wfTest} onChange={(e) => setWfTest(e.target.value)} />
+                </label>
+                <label>
+                  每次滾動月數
+                  <input type="number" min={1} max={24} value={wfStep} onChange={(e) => setWfStep(e.target.value)} />
+                </label>
+              </>
+            )}
+          </div>
+          <p className="order-hint">
+            {validationMode === "walk_forward" ? (
+              <>
+                同一組設定在多段不同時期各測一次，回報平均與<b>標準差</b>。
+                標準差才是重點——平均 Rank IC +0.02 但標準差 0.06 的訊號站不住腳，
+                換一段測試期就可能翻正負號。下方六個日期此時只用來界定<b>整段範圍</b>
+                （第一折從「訓練起」開始，一路滾到「測試迄」為止），每一折的實際切分由上面的月數決定。
+              </>
+            ) : (
+              <>
+                只切一次，用下方六個日期。測試期只有一段市況，
+                得到的分數很可能只是「那段期間剛好」——實測同一個架構跑兩次就能讓測試 Rank IC 翻正負號。
+                除非你要重現某個特定切分，否則建議用滾動視窗。
+              </>
+            )}
+          </p>
 
           <h3 className="tutorial-heading">資料切分</h3>
           <p className="order-hint">依時間切分，不能隨機切——訓練期一定要早於驗證期，驗證期早於測試期</p>

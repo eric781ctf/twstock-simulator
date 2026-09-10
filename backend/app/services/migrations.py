@@ -31,6 +31,13 @@ def run_lightweight_migrations(engine: Engine) -> None:
         conn.execute(
             text(
                 "ALTER TABLE prediction_models ADD COLUMN IF NOT EXISTS "
+                "validation_mode VARCHAR(20) NOT NULL DEFAULT 'single'"
+            )
+        )
+        conn.execute(text("ALTER TABLE prediction_models ADD COLUMN IF NOT EXISTS walk_forward_config JSON"))
+        conn.execute(
+            text(
+                "ALTER TABLE prediction_models ADD COLUMN IF NOT EXISTS "
                 "label_mode VARCHAR(20) NOT NULL DEFAULT 'absolute'"
             )
         )
