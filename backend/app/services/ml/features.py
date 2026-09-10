@@ -69,6 +69,11 @@ SHAREHOLDING_FEATURE_KEYS = [
     "retail_holder_share_percent",
     "retail_holder_count_change_4w",
     "mid_holder_share_change_4w",
+    # 連續幾週同方向。跟 4 週淨變化是不同的東西：淨變化 +0.5 個百分點可能是
+    # 「一週大漲、三週小跌」，也可能是「連四週穩定流入」，後者才是籌碼真的在
+    # 集中。原始 side project 篩的正是「散戶連續遞減且大戶連續遞增」。
+    "big_holder_share_streak",
+    "retail_holder_count_streak",
 ]
 
 FEATURE_KEYS = (
@@ -139,6 +144,8 @@ FEATURE_LABELS: dict[str, str] = {
     "retail_holder_share_percent": "散戶（<10張）持股比例 %",
     "retail_holder_count_change_4w": "散戶人數近 4 週變化率 %",
     "mid_holder_share_change_4w": "中實戶（400~800張）持股比例近 4 週增減",
+    "big_holder_share_streak": "大戶持股比例連續增減週數（增為正、減為負）",
+    "retail_holder_count_streak": "散戶人數連續增減週數（增為正、減為負）",
 }
 
 for _window in WINDOWS:
@@ -298,6 +305,21 @@ def market_levels(series: dict[date, dict]) -> dict[date, float]:
 
 
 
+def _weekly_streak(weekly: pd.DataFrame, column: str) -> pd.Series:
+    """連續同方向的週數（增為正、減為負、持平歸零）。
+
+    跟 _streak_days 同一個手法：方向一改變就開一個新的段，段內累計次數就是
+    連續週數。這裡多一個「換股票就斷開」的條件——不然一檔的結尾會接到下一檔
+    的開頭，算出一段跨股票的假連續。
+    """
+    direction = np.sign(weekly.groupby("stock_code", sort=False)[column].diff().fillna(0)).astype(int)
+    changed = (direction != direction.shift(1)) | (
+        weekly["stock_code"] != weekly["stock_code"].shift(1)
+    )
+    length = direction.groupby(changed.cumsum()).cumcount() + 1
+    return (length * direction).astype(float)
+
+
 def _attach_shareholding(combined: pd.DataFrame, db: Session, start: date, end: date) -> pd.DataFrame:
     """股權分散表是週頻，用「日期**嚴格早於**特徵日」的最後一筆往前填。
 
@@ -352,6 +374,9 @@ def _attach_shareholding(combined: pd.DataFrame, db: Session, start: date, end: 
     weekly["retail_holder_count_change_4w"] = (
         (weekly["retail_holders"] - past_holders) / past_holders.replace(0, np.nan) * 100
     ).where(position >= 4)
+
+    weekly["big_holder_share_streak"] = _weekly_streak(weekly, "big_holder_share_percent")
+    weekly["retail_holder_count_streak"] = _weekly_streak(weekly, "retail_holders")
 
     # .copy()：上一行的欄位選取回傳的是切片，直接改會觸發 SettingWithCopyWarning
     weekly = weekly[["stock_code", "as_of_date"] + SHAREHOLDING_FEATURE_KEYS].copy()
