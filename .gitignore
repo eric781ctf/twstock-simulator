@@ -16,3 +16,6 @@ backend/model_artifacts/
 # （Git Bash 會把 /app/... 轉成 Windows 路徑，rm 就靜默失敗），所以這裡設一道防線。
 backend/*_tmp.py
 backend/probe*.py
+
+# 集保股權分散表的原始 CSV（約 50MB，且可從 TDCC 重新下載）
+backend/tdcc_data/

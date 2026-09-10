@@ -171,6 +171,16 @@ class ChipStatusOut(BaseModel):
     progress: BackfillProgressOut
 
 
+class ShareholdingStatusOut(BaseModel):
+    """集保股權分散表的涵蓋範圍。週頻資料，所以看的是「幾週」而不是「幾天」。"""
+
+    earliest_date: date | None
+    latest_date: date | None
+    total_rows: int
+    week_count: int
+    message: str | None = None
+
+
 class BackfillTargetIn(BaseModel):
     target_months: int = Field(gt=0, le=120)
 

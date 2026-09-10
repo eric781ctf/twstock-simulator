@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.database import SessionLocal, get_db
 from app.models import ChipDaily, User
 from app.schemas import (
+    ShareholdingStatusOut,
     ChipStatusOut,
     AdminAccountOut,
     AdminAmountIn,
@@ -23,6 +24,11 @@ from app.schemas import (
 )
 from app.services import backfill_status
 from app.services.chip_sync import backfill_chip_data, earliest_chip_date, latest_chip_date
+from app.services.shareholding_sync import (
+    coverage as shareholding_coverage,
+    fetch_latest as fetch_latest_shareholding,
+    import_directory as import_shareholding_directory,
+)
 from app.services.admin import AdminActionError, add_cash_to_all, delete_account, freeze_account, list_all_accounts
 from app.services.app_config import (
     get_default_initial_cash,
@@ -174,6 +180,33 @@ async def trigger_chip_backfill(
 
     asyncio.create_task(_run_chip_backfill_task(payload.target_months))
     return get_chip_status(db)
+
+
+@router.get("/models/shareholding-status", response_model=ShareholdingStatusOut)
+def get_shareholding_status(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    return ShareholdingStatusOut(**shareholding_coverage(db))
+
+
+@router.post("/models/shareholding-import", response_model=ShareholdingStatusOut)
+def trigger_shareholding_import(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    """把 backend/tdcc_data/ 底下的 TDCC CSV 匯入。
+
+    TDCC 的線上端點只給最新一週，歷史只能靠先前存下來的檔案，所以這是一次性的
+    匯入而不是回補。之後每週的新資料由 shareholding-fetch 接上。
+    """
+    result = import_shareholding_directory(db)
+    status = shareholding_coverage(db)
+    status["message"] = result["message"]
+    return ShareholdingStatusOut(**status)
+
+
+@router.post("/models/shareholding-fetch", response_model=ShareholdingStatusOut)
+async def trigger_shareholding_fetch(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    """從 TDCC 抓最新一週。只有最新一週，用來持續累積。"""
+    result = await fetch_latest_shareholding(db)
+    status = shareholding_coverage(db)
+    status["message"] = result["message"]
+    return ShareholdingStatusOut(**status)
 
 
 @router.get("/models/schedulers", response_model=list[SchedulerFlagOut])
