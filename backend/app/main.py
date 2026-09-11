@@ -29,7 +29,7 @@ from app.services.app_config import ensure_app_config
 from app.services.equity import snapshot_all_accounts_equity
 from app.services.feature_flags import SCHEDULER_DAILY_BAR_BACKFILL, ensure_feature_flags, is_enabled
 from app.services.migrations import run_lightweight_migrations
-from app.services.ml.training_runner import shutdown_executor
+from app.services.ml.training_runner import recover_orphaned_jobs, shutdown_executor
 from app.services.scheduler import start_scheduler, stop_scheduler
 from app.services.stock_sync import backfill_twse_to_target, backfill_valuation_history, sync_stocks, sync_valuations
 
@@ -79,6 +79,14 @@ async def lifespan(app: FastAPI):
             logger.warning("啟動時股票清單同步失敗或無資料，將於背景排程重試")
         await sync_valuations(db)
         snapshot_all_accounts_equity(db)
+    finally:
+        db.close()
+
+    # 排在 start_scheduler 之前：重新排入佇列的工作要先卡好位置，
+    # 不然當天的排程任務可能插在前面
+    db = SessionLocal()
+    try:
+        recover_orphaned_jobs(db)
     finally:
         db.close()
 

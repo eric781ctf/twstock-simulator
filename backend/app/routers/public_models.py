@@ -94,6 +94,7 @@ def _summary(model: PredictionModel, stats: dict) -> ModelSummaryOut:
         validation_mode=model.validation_mode,
         feature_scaling=model.feature_scaling,
         feature_scaling_label=SCALING_MODE_LABELS.get(model.feature_scaling, model.feature_scaling),
+        industry_neutral=model.industry_neutral,
         score_formula=model.score_formula,
         training_duration_seconds=model.training_duration_seconds,
         training_progress=model.training_progress,

@@ -29,11 +29,13 @@ from app.services.ml.dataset import (
     attach_labels,
     fit_scaler,
     fit_scaler_sequences,
+    industry_neutralize,
     rank_normalize,
     split_by_date,
     to_matrix,
 )
-from app.services.ml.features import MARKET_FEATURE_KEYS, WARMUP_BARS, build_feature_rows
+from app.services.industry_sync import load_industry_map
+from app.services.ml.features import CROSS_SECTION_SKIP_KEYS, WARMUP_BARS, build_feature_rows
 from app.services.ml.selection import ModelBundle
 from app.services.ml.train import SEQUENCE_MODEL_TYPES, train_dual_task
 from app.services.ml.walk_forward import (
@@ -52,6 +54,10 @@ VALIDATION_WALK_FORWARD = "walk_forward"
 logger = logging.getLogger(__name__)
 
 _executor: ProcessPoolExecutor | None = None
+
+# 已排入但還沒跑完的訓練工作。只是為了不讓 asyncio 把它們 GC 掉——
+# 真正的排隊是 executor 的 max_workers=1 在做的
+_pending_tasks: set[asyncio.Task] = set()
 
 # 暖身需要的日曆天數：60 個交易日約等於 90 個日曆天，多抓一些緩衝
 WARMUP_CALENDAR_DAYS = WARMUP_BARS * 2
@@ -170,7 +176,14 @@ def _prepare_rows(db: Session, model: PredictionModel, feature_keys: list[str], 
     # 而且必須在切分之前做——每折各自排名的話，同一天的同一檔股票會因為
     # 落在不同折而拿到不同的名次，那是沒有意義的
     if model.feature_scaling == SCALING_RANK:
-        labeled = rank_normalize(labeled, feature_keys, skip=set(MARKET_FEATURE_KEYS))
+        labeled = rank_normalize(labeled, feature_keys, skip=set(CROSS_SECTION_SKIP_KEYS))
+
+    # 產業中性化排在排名之後：兩者都是「同一天的橫斷面」運算，先排名再減同業
+    # 中位數，得到的是「這檔在同業裡的相對名次」，比直接減原始值穩定
+    if model.industry_neutral:
+        labeled = industry_neutralize(
+            labeled, feature_keys, load_industry_map(db), skip=set(CROSS_SECTION_SKIP_KEYS)
+        )
 
     return labeled, bars_by_code
 
@@ -366,6 +379,7 @@ def _train_sync(model_id: int) -> dict:
             scaler_std,
             sequence_length,
             model.feature_scaling,
+            model.industry_neutral,
         )
         bundle = ModelBundle(
             regressor=regressor,
@@ -375,6 +389,7 @@ def _train_sync(model_id: int) -> dict:
             scaler_std=scaler_std,
             sequence_length=sequence_length,
             feature_scaling=model.feature_scaling,
+            industry_neutral=model.industry_neutral,
         )
 
         from app.services.ml.train import build_data_warnings
@@ -429,6 +444,76 @@ async def run_training_job(model_id: int) -> None:
         await loop.run_in_executor(get_executor(), _train_sync, model_id)
     except Exception:
         logger.exception("訓練工作 %d 執行時發生非預期錯誤", model_id)
+
+
+def enqueue_training(model_id: int) -> None:
+    """排入訓練佇列。
+
+    真正的序列化是 executor 的 max_workers=1 做的——同時送進來十筆，也只會有
+    一筆在跑，其餘的 future 在 executor 裡排隊，`status` 要等輪到它、進了
+    worker 才會從 queued 變成 training。所以佇列深度直接反映在 status 上，
+    不需要另外維護一份狀態。
+
+    這裡唯一多做的事是**把 task 的參照留住**。asyncio 只持有 task 的弱參照，
+    create_task 的回傳值沒人接的話，任務可能在被排到之前就被 GC 掉——佇列愈長
+    愈容易踩到，而且失敗時是無聲的。
+    """
+    task = asyncio.create_task(run_training_job(model_id))
+    _pending_tasks.add(task)
+    task.add_done_callback(_pending_tasks.discard)
+    logger.info("模型 %d 排入訓練佇列（目前佇列中 %d 筆）", model_id, len(_pending_tasks))
+
+
+def recover_orphaned_jobs(db: Session) -> dict:
+    """後端重啟時處理上一輪留下來的工作。
+
+    重啟會把 process pool 連同裡面跑到一半的訓練一起帶走，但資料庫那一列還停在
+    training／queued，之後永遠不會有人去動它。兩種狀態要分開處理：
+
+    - training：已經跑掉一部分，沒有辦法接續（中間狀態全在那個 process 裡），
+      標成 failed 讓它能被刪掉，而不是留一筆看起來還在跑的殭屍。
+    - queued：還沒開始，重新排進佇列就好，沒有任何東西遺失。
+    """
+    interrupted = db.query(PredictionModel).filter(PredictionModel.status == "training").all()
+    for model in interrupted:
+        model.status = "failed"
+        model.training_progress = None
+        model.error_message = "後端在訓練途中重新啟動，這次訓練已中斷（可以直接刪除這個版本再訓練一次）"
+    waiting = db.query(PredictionModel).filter(PredictionModel.status == "queued").all()
+    db.commit()
+
+    for model in waiting:
+        enqueue_training(model.id)
+
+    if interrupted or waiting:
+        logger.warning(
+            "recover_orphaned_jobs: %d 筆訓練中被標成失敗、%d 筆重新排入佇列",
+            len(interrupted),
+            len(waiting),
+        )
+    return {"interrupted": len(interrupted), "requeued": len(waiting)}
+
+
+def queue_position(model: PredictionModel, ahead_counts: dict[int, int]) -> int | None:
+    """佇列裡前面還有幾筆。training 是 0（就是它在跑），已完成的是 None。"""
+    if model.status == "training":
+        return 0
+    if model.status != "queued":
+        return None
+    return ahead_counts.get(model.id, 0)
+
+
+def count_ahead(db: Session, model_ids: list[int]) -> dict[int, int]:
+    """一次算好每筆前面卡了幾個，避免列表頁對每一列各查一次。"""
+    pending = [
+        row_id
+        for (row_id,) in db.query(PredictionModel.id)
+        .filter(PredictionModel.status.in_(("queued", "training")))
+        .order_by(PredictionModel.id.asc())
+        .all()
+    ]
+    order = {row_id: i for i, row_id in enumerate(pending)}
+    return {mid: order[mid] for mid in model_ids if mid in order}
 
 
 def suggest_split_dates(latest_date: date | None) -> dict[str, date]:

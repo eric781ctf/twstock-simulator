@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.models import ChipDaily, DailyBar, Market, ShareholdingWeekly, Stock, StockValuationHistory
 from app.services.indicators import compute_kd_series
+from app.services.industry_sync import INDUSTRY_NAMES, load_industry_map
 from app.services.ml.price_features import (
     PRICE_FEATURE_KEYS,
     WINDOWS,
@@ -76,6 +77,20 @@ SHAREHOLDING_FEATURE_KEYS = [
     "retail_holder_count_streak",
 ]
 
+# 產業別：33 個產業各一個 0/1 欄，外加一個「未分類」（ETF、受益證券）。
+#
+# 用 one-hot 而不是把產業代碼當成一個整數欄：代碼是名目尺度，「24 半導體」
+# 跟「25 電腦週邊」相鄰不代表它們比「01 水泥」接近，整數欄會讓模型學到
+# 根本不存在的順序。LightGBM 有原生的類別型支援，但那是 LightGBM 專屬的，
+# 這個系統還有 XGBoost／隨機森林／邏輯回歸／神經網路——one-hot 是唯一
+# 所有模型都吃得下、而且語意一致的表示法。
+#
+# 這跟產業中性化是**相反**的思路：中性化強制把產業成分減掉，one-hot 是把
+# 產業資訊交給模型，讓它自己決定要不要用、怎麼用。
+INDUSTRY_FEATURE_KEYS = [f"industry_{code}" for code in sorted(INDUSTRY_NAMES)] + [
+    "industry_unknown"
+]
+
 FEATURE_KEYS = (
     PRICE_FEATURE_KEYS
     + _KD_FEATURE_KEYS
@@ -84,6 +99,7 @@ FEATURE_KEYS = (
     + _RELATIVE_FEATURE_KEYS
     + CHIP_FEATURE_KEYS
     + SHAREHOLDING_FEATURE_KEYS
+    + INDUSTRY_FEATURE_KEYS
 )
 
 # 滾動類特徵是「運算子 × 視窗」的組合，標籤跟著組出來就好——手寫 28 個
@@ -154,6 +170,11 @@ for _window in WINDOWS:
 
 # 清單與標籤必須完全對得上。對不上要在載入時就炸掉，不要等到訓練跑一半、
 # 或前端顯示出一個 key 當標籤才發現
+FEATURE_LABELS.update(
+    {f"industry_{code}": f"產業別：{name}" for code, name in INDUSTRY_NAMES.items()}
+)
+FEATURE_LABELS["industry_unknown"] = "產業別：未分類（ETF、受益證券）"
+
 _missing = [key for key in FEATURE_KEYS if key not in FEATURE_LABELS]
 if _missing:
     raise RuntimeError(f"這些特徵沒有中文標籤：{_missing}")
@@ -189,6 +210,10 @@ CURATED_FEATURES = [
 # 純價量：不含估值與籌碼面，用來對照「基本面與籌碼面到底有沒有加分」
 PRICE_ONLY_FEATURES = list(PRICE_FEATURE_KEYS) + _KD_FEATURE_KEYS
 
+# 精選＋產業別：拿來測「把產業資訊交給模型自己判斷」有沒有用的對照組。
+# 跟精選只差 34 個 0/1 欄，其他完全相同。
+CURATED_WITH_INDUSTRY_FEATURES = CURATED_FEATURES + list(INDUSTRY_FEATURE_KEYS)
+
 DEFAULT_FEATURES = CURATED_FEATURES
 
 FEATURE_PRESETS: list[dict] = [
@@ -209,12 +234,29 @@ FEATURE_PRESETS: list[dict] = [
         "features": list(FEATURE_KEYS),
     },
     {
+        "key": "curated_industry",
+        "label": "精選＋產業別",
+        "description": (
+            f"精選的 {len(CURATED_FEATURES)} 項，再加上 {len(INDUSTRY_FEATURE_KEYS)} 個產業別 0/1 欄。"
+            "跟「產業中性化」是相反的做法：中性化強制減掉產業成分，這個是把產業資訊交給模型自己決定怎麼用。"
+        ),
+        "features": CURATED_WITH_INDUSTRY_FEATURES,
+    },
+    {
         "key": "price_only",
         "label": "純價量",
         "description": f"只用價量與技術指標的 {len(PRICE_ONLY_FEATURES)} 項，不含估值、大盤與籌碼面。適合當對照組。",
         "features": PRICE_ONLY_FEATURES,
     },
 ]
+
+# 做橫斷面運算（排名、產業中性化）時要跳過的欄位，三個呼叫點共用一份。
+#
+# 大盤特徵在同一天對所有股票是同一個值：排名會讓全市場拿到同一個名次、
+# 減掉中位數會讓整欄變成 0，等於把特徵消滅。產業 one-hot 是 0/1 的指示欄，
+# 排名會把它變成兩個沒有意義的小數、產業中性化更會讓它在自己那一組裡
+# 恆等於 0——它本來就不是拿來跟同業比大小的東西。
+CROSS_SECTION_SKIP_KEYS = frozenset(MARKET_FEATURE_KEYS) | frozenset(INDUSTRY_FEATURE_KEYS)
 
 # 指標要算得準（尤其 MA60）需要的暖身天數；資料不足這個長度的股票不會產生特徵列
 WARMUP_BARS = 60
@@ -399,6 +441,34 @@ def _attach_shareholding(combined: pd.DataFrame, db: Session, start: date, end: 
     return merged.sort_values(["stock_code", "as_of_date"]).reset_index(drop=True)
 
 
+def _attach_industry(combined: pd.DataFrame, db: Session) -> pd.DataFrame:
+    """把產業別攤成 one-hot 欄位。
+
+    產業別沒有歷史（TWSE 只給現在的分類），所以整段期間都用現況——同一檔
+    股票的這幾欄在所有日期上都一樣。這是刻意的近似，產業別極少變動。
+
+    沒有產業別的證券（ETF、受益證券）進 industry_unknown，而不是整排 0——
+    「不屬於任何已知產業」本身就是一個有意義的類別，全 0 會讓模型分不出
+    「沒有分類」跟「分類欄位剛好都不是」。
+    """
+    industry_map = load_industry_map(db)
+    codes = combined["stock_code"].map(lambda c: industry_map.get(c))
+
+    for code in sorted(INDUSTRY_NAMES):
+        combined[f"industry_{code}"] = (codes == code).astype("float64")
+    combined["industry_unknown"] = codes.isna().astype("float64")
+
+    classified = int((~codes.isna()).sum())
+    logger.info(
+        "_attach_industry: %d / %d 列有產業別（%d 檔股票、%d 個產業欄）",
+        classified,
+        len(combined),
+        combined["stock_code"].nunique(),
+        len(INDUSTRY_FEATURE_KEYS),
+    )
+    return combined
+
+
 def build_feature_rows(
     db: Session,
     fetch_start: date,
@@ -443,6 +513,7 @@ def build_feature_rows(
     combined = _attach_market(combined, build_market_series(bars_by_code))
     combined = _attach_chips(combined, db, fetch_start, fetch_end, frame)
     combined = _attach_shareholding(combined, db, fetch_start, fetch_end)
+    combined = _attach_industry(combined, db)
 
     # NaN 要換成 None：下游用 `value is None` 判斷缺值，NaN 會被當成有值
     combined = combined.astype(object).where(pd.notna(combined), None)

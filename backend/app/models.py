@@ -91,6 +91,9 @@ class Stock(Base):
     code: Mapped[str] = mapped_column(String(10), primary_key=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     market: Mapped[Market] = mapped_column(Enum(Market), nullable=False)
+    # TWSE 產業別代碼（24=半導體…）。只用來做產業中性化的分組；
+    # ETF 與受益證券沒有產業別，維持 NULL
+    industry: Mapped[str | None] = mapped_column(String(10), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
@@ -293,6 +296,8 @@ class PredictionModel(Base):
     # 特徵標準化方式：zscore（用訓練期的平均/標準差）或
     # cross_sectional_rank（每天換算成全市場分位數）
     feature_scaling: Mapped[str] = mapped_column(String(30), nullable=False, default="zscore")
+    # 是否把特徵減掉當天同產業的中位數
+    industry_neutral: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     # 出場規則（四層，依序判斷，見 services/ml/exit_rules.py）
     min_hold_days: Mapped[int | None] = mapped_column(Integer, nullable=True)

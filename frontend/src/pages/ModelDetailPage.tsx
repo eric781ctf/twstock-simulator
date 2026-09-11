@@ -385,6 +385,10 @@ export default function ModelDetailPage() {
             <span className="label">訓練特徵</span> {detail.feature_labels.join("、")}
           </div>
           <div>
+            <span className="label">特徵處理</span> {summary.feature_scaling_label}
+            {summary.industry_neutral && "　＋ 產業中性化（減掉當天同產業中位數）"}
+          </div>
+          <div>
             <span className="label">資料切分</span> 訓練 {detail.train_start}~{detail.train_end}　驗證{" "}
             {detail.validation_start}~{detail.validation_end}　測試 {detail.test_start}~{detail.test_end}
           </div>

@@ -12,6 +12,7 @@
 """
 
 import logging
+from collections import Counter
 from datetime import date
 
 import numpy as np
@@ -178,6 +179,23 @@ SCALING_MODE_LABELS: dict[str, str] = {
 }
 
 
+def _write_back(rows: list[dict], keys: list[str], values: pd.DataFrame) -> list[dict]:
+    """把算好的欄位寫回 row dict。
+
+    先轉成一個 numpy 陣列再逐格取，而不是對每一格呼叫 `.iat`——三十幾萬列乘上
+    七十幾個特徵是兩千多萬格，`.iat` 的每格開銷在這個量級會變成幾十秒。
+    """
+    matrix = values[keys].to_numpy(dtype="float64", copy=False)
+    nan_mask = np.isnan(matrix)
+    out: list[dict] = []
+    for i, row in enumerate(rows):
+        new_row = dict(row)
+        for j, key in enumerate(keys):
+            new_row[key] = None if nan_mask[i, j] else float(matrix[i, j])
+        out.append(new_row)
+    return out
+
+
 def rank_normalize(rows: list[dict], feature_keys: list[str], skip: set[str] | None = None) -> list[dict]:
     """把每個特徵換成「當天在全市場的分位數」（0~1）。
 
@@ -212,19 +230,75 @@ def rank_normalize(rows: list[dict], feature_keys: list[str], skip: set[str] | N
     frame["__day"] = [row["as_of_date"] for row in rows]
 
     ranked = frame.groupby("__day", sort=False)[rank_keys].rank(pct=True)
-
-    out: list[dict] = []
-    for i, row in enumerate(rows):
-        new_row = dict(row)
-        for key in rank_keys:
-            value = ranked[key].iat[i]
-            new_row[key] = None if pd.isna(value) else float(value)
-        out.append(new_row)
+    out = _write_back(rows, rank_keys, ranked)
 
     logger.info(
         "rank_normalize: %d 列、%d 個特徵換算成當日橫斷面分位數（%d 個跳過）",
         len(out),
         len(rank_keys),
         len(feature_keys) - len(rank_keys),
+    )
+    return out
+
+
+# 產業中性化的最小分組人數。低於這個數的產業當天會被併成「零星產業」一組——
+# 一檔自成一組時減掉自己的中位數恆等於 0，等於把那一列的特徵全部抹掉
+MIN_GROUP_SIZE = 3
+
+
+def industry_neutralize(
+    rows: list[dict],
+    feature_keys: list[str],
+    industry_map: dict[str, str],
+    skip: set[str] | None = None,
+) -> list[dict]:
+    """把每個特徵減掉「當天、同產業」的中位數。
+
+    「電子股今天全漲」不該被當成個股 alpha。減掉同業中位數之後，剩下的才是
+    這檔相對同業的強弱——這也是多因子模型處理產業曝險的標準做法。
+
+    用中位數而不是平均數：產業內常有一兩檔極端值（漲停、剛除權），平均數會被
+    它們拉走，中位數不會。
+
+    skip 裡的特徵不處理，理由跟 rank_normalize 一樣：大盤特徵在同一天對所有
+    股票是同一個值，減掉同業中位數會讓它整欄變成 0。
+
+    沒有產業別的證券（ETF、受益證券）自成一組。它們不該跟個股比，但彼此之間
+    比是有意義的——把它們丟進「未分類」這一組，而不是留著不處理。
+
+    **人數太少的產業會被併成同一組。** 一檔股票自己一組時，減掉自己的中位數
+    恆等於 0，那個特徵就被徹底消滅了；兩檔的話也只剩下彼此的正負號。所以當天
+    不到 MIN_GROUP_SIZE 檔的產業會一起丟進「零星產業」這一組——併組之後至少
+    還是在跟別人比，比整欄變成 0 有意義。
+    """
+    if not rows:
+        return rows
+
+    skip = skip or set()
+    target_keys = [k for k in feature_keys if k not in skip]
+    if not target_keys:
+        return rows
+
+    frame = pd.DataFrame(
+        {key: [row.get(key) for row in rows] for key in target_keys},
+        dtype="float64",
+    )
+    raw_groups = [
+        f"{row['as_of_date']}|{industry_map.get(row['stock_code'], 'UNKNOWN')}" for row in rows
+    ]
+    sizes = Counter(raw_groups)
+    frame["__group"] = [
+        g if sizes[g] >= MIN_GROUP_SIZE else f"{g.split('|', 1)[0]}|__SPARSE__" for g in raw_groups
+    ]
+
+    medians = frame.groupby("__group", sort=False)[target_keys].transform("median")
+    neutral = frame[target_keys] - medians
+    out = _write_back(rows, target_keys, neutral)
+
+    logger.info(
+        "industry_neutralize: %d 列、%d 個特徵減去同日同產業中位數（%d 個跳過）",
+        len(out),
+        len(target_keys),
+        len(feature_keys) - len(target_keys),
     )
     return out

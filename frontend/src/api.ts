@@ -4,6 +4,8 @@ import type {
   AuthResponse,
   BackfillStatus,
   ChipStatus,
+  IndustryStatus,
+  ShareholdingStatus,
   BacktestRequest,
   BacktestResult,
   DailyBar,
@@ -173,6 +175,13 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ target_months: targetMonths }),
     }),
+  getShareholdingStatus: () => request<ShareholdingStatus>("/admin/models/shareholding-status"),
+  importShareholding: () =>
+    request<ShareholdingStatus>("/admin/models/shareholding-import", { method: "POST" }),
+  fetchShareholding: () =>
+    request<ShareholdingStatus>("/admin/models/shareholding-fetch", { method: "POST" }),
+  getIndustryStatus: () => request<IndustryStatus>("/admin/models/industry-status"),
+  syncIndustries: () => request<IndustryStatus>("/admin/models/industry-sync", { method: "POST" }),
   getModelSchedulers: () => request<SchedulerFlag[]>("/admin/models/schedulers"),
   triggerBackfill: (targetMonths: number) =>
     request<BackfillStatus>("/admin/models/backfill", {
