@@ -675,6 +675,17 @@ tbody tr:hover {
   color: var(--muted);
 }
 
+.model-card-created {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .model-card-meta {
   font-size: 12px;
   color: var(--muted);

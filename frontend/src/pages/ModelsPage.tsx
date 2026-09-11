@@ -11,12 +11,12 @@ type SortKey = "recent" | "rank_ic" | "backtest_return" | "total_return" | "real
 
 const SORT_OPTIONS: Record<Tab, { key: SortKey; label: string }[]> = {
   training: [
-    { key: "recent", label: "訓練時間（新到舊）" },
+    { key: "recent", label: "建立時間（新到舊）" },
     { key: "rank_ic", label: "測試 Rank IC（高到低）" },
     { key: "backtest_return", label: "回測平均報酬（高到低）" },
   ],
   live: [
-    { key: "recent", label: "訓練時間（新到舊）" },
+    { key: "recent", label: "建立時間（新到舊）" },
     { key: "total_return", label: "目前持有總損益率（高到低）" },
     { key: "realized_return", label: "已實現平均（高到低）" },
   ],
@@ -30,6 +30,15 @@ function formatPercent(value: number | null): string {
 function formatNumber(value: number | null, digits = 4): string {
   if (value == null) return "-";
   return `${value >= 0 ? "+" : ""}${value.toFixed(digits)}`;
+}
+
+/** 卡片上只要看得出是哪一天、大概幾點就夠，秒數與時區沒有意義 */
+function formatCreatedAt(iso: string): string {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return "-";
+  const d = new Date(t);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 function returnClass(value: number | null): string {
@@ -51,11 +60,9 @@ function byDescending(get: (m: ModelSummary) => number | null) {
 }
 
 const SORTERS: Record<SortKey, (a: ModelSummary, b: ModelSummary) => number> = {
-  recent: (a, b) => {
-    const x = a.trained_at ?? a.created_at;
-    const y = b.trained_at ?? b.created_at;
-    return y.localeCompare(x);
-  },
+  // 用時間戳比大小而不是字串比對：字串只有在格式完全一致時才排得對，
+  // 時區寫法一變（+00:00 vs Z）順序就會悄悄跑掉
+  recent: (a, b) => Date.parse(b.created_at) - Date.parse(a.created_at),
   rank_ic: byDescending((m) => m.test_rank_ic),
   backtest_return: byDescending((m) => m.backtest_average_return_percent),
   total_return: byDescending((m) => m.total_unrealized_return_percent),
@@ -162,7 +169,10 @@ export default function ModelsPage() {
                 <span className="model-card-title">
                   {m.model_family} <span className="model-card-version">v{m.version}</span>
                 </span>
-                {m.is_archived && <span className="archived-badge">已封存</span>}
+                <span className="model-card-created">
+                  建立於 {formatCreatedAt(m.created_at)}
+                  {m.is_archived && <span className="archived-badge">已封存</span>}
+                </span>
               </div>
               <div className="model-card-meta">
                 {m.model_type}　預測未來 {m.n_days} 日　門檻 {m.threshold_percent}%
