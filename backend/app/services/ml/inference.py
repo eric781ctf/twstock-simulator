@@ -76,23 +76,25 @@ def _score_one_model(
     model: PredictionModel,
     today: date,
     rows_today: list[dict],
+    signal_rows: list[dict],
     all_rows: list[dict],
     bars_by_code: dict[str, list[DailyBar]],
 ) -> int:
     """跑單一模型的當日循環，回傳這次的異動筆數（出場 + 進場）。
 
-    all_rows 含今天之前那段歷史，只有序列模型會用到。
+    signal_rows 是前一個交易日的特徵列，進場排名用它算；rows_today 只提供
+    今天的成交價與漲跌停狀態。all_rows 含今天之前那段歷史，只有序列模型會用到。
     """
     bundle = artifacts.load_bundle(model.model_artifact_path)
 
-    # 排名要在「當天全市場」上算，跟訓練時的基準一致。若只對候選股（已扣掉
-    # 手上持有的）排名，同一檔的名次會因為手上有幾檔而漂移
+    # 橫斷面轉換要套在「訊號那一天的全市場」上，跟訓練時的基準一致。若只對
+    # 候選股（已扣掉手上持有的）排名，同一檔的名次會因為手上有幾檔而漂移
     if bundle.feature_scaling == SCALING_RANK:
-        rows_today = rank_normalize(rows_today, bundle.feature_keys, skip=set(CROSS_SECTION_SKIP_KEYS))
+        signal_rows = rank_normalize(signal_rows, bundle.feature_keys, skip=set(CROSS_SECTION_SKIP_KEYS))
 
     if bundle.industry_neutral:
-        rows_today = industry_neutralize(
-            rows_today, bundle.feature_keys, load_industry_map(db), skip=set(CROSS_SECTION_SKIP_KEYS)
+        signal_rows = industry_neutralize(
+            signal_rows, bundle.feature_keys, load_industry_map(db), skip=set(CROSS_SECTION_SKIP_KEYS)
         )
 
     if bundle.sequence_length:
@@ -124,7 +126,9 @@ def _score_one_model(
         if index is not None:
             bars_until_today[code] = bars_by_code[code][: index + 1]
 
-    exits, entries = run_daily_cycle(model, bundle, today, rows_today, bars_until_today, open_positions)
+    exits, entries = run_daily_cycle(
+        model, bundle, today, rows_today, signal_rows, bars_until_today, open_positions
+    )
 
     for action in exits:
         holding: ModelHolding = action.position.ref
@@ -169,9 +173,11 @@ def run_daily_scoring(db: Session, today: date | None = None) -> int:
     # 序列模型要看今天之前連續 T 天的特徵，所以特徵列不能只產出今天這一天。
     # 取所有啟用中模型裡最長的那個視窗，一次撈足，全部模型共用同一份。
     max_sequence = _max_sequence_length(models)
-    feature_start = today
+    # 至少要多涵蓋一個交易日：進場訊號取的是前一天。抓 10 個日曆天是為了
+    # 跨過週末與連假，不然遇到長假就找不到前一個交易日
+    feature_start = today - timedelta(days=10)
     if max_sequence:
-        feature_start -= timedelta(days=int(max_sequence * TRADING_DAY_TO_CALENDAR) + 7)
+        feature_start = today - timedelta(days=int(max_sequence * TRADING_DAY_TO_CALENDAR) + 7)
 
     fetch_start = feature_start - timedelta(days=WARMUP_CALENDAR_DAYS)
     rows, bars_by_code = build_feature_rows(db, fetch_start, today, feature_start)
@@ -179,6 +185,14 @@ def run_daily_scoring(db: Session, today: date | None = None) -> int:
     if not rows_today:
         logger.warning("run_daily_scoring: %s 沒有可用的特徵列（可能不是交易日或資料未同步），略過", today)
         return 0
+
+    previous_days = sorted({row["as_of_date"] for row in rows if row["as_of_date"] < today})
+    if not previous_days:
+        logger.warning("run_daily_scoring: 找不到 %s 的前一個交易日，無法產生進場訊號，略過", today)
+        return 0
+    signal_day = previous_days[-1]
+    signal_rows = [row for row in rows if row["as_of_date"] == signal_day]
+    logger.info("run_daily_scoring: %s 成交，進場訊號取自 %s", today, signal_day)
 
     done = 0
     for model in models:
@@ -192,7 +206,7 @@ def run_daily_scoring(db: Session, today: date | None = None) -> int:
 
         started = time.perf_counter()
         try:
-            _score_one_model(db, model, today, rows_today, rows, bars_by_code)
+            _score_one_model(db, model, today, rows_today, signal_rows, rows, bars_by_code)
             status, error = "success", None
         except Exception as e:
             logger.exception("模型 %d 當日選股失敗", model.id)

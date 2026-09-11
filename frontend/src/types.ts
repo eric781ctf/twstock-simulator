@@ -322,6 +322,8 @@ export interface ModelTrainRequest {
   validation_mode: ValidationMode;
   feature_scaling: FeatureScaling;
   industry_neutral: boolean;
+  /** 分數低於這個值就不買；null 表示不設限 */
+  min_score?: number | null;
   walk_forward_config?: WalkForwardConfigInput | null;
   score_weights?: { return: number; probability: number } | null;
   network_config?: NetworkConfigInput | null;
@@ -437,6 +439,7 @@ export interface ModelSummary {
   feature_scaling: string;
   feature_scaling_label: string;
   industry_neutral: boolean;
+  min_score: number | null;
   score_formula: ScoreFormula;
   training_duration_seconds: number | null;
   /** 訓練途中才有值，完成或失敗後回到 null */

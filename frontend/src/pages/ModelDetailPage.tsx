@@ -393,6 +393,10 @@ export default function ModelDetailPage() {
             {detail.validation_start}~{detail.validation_end}　測試 {detail.test_start}~{detail.test_end}
           </div>
           <div>
+            <span className="label">進場規則</span> 訊號取前一個交易日、以當日收盤價成交，漲停不買
+            {summary.min_score != null && `　最低分數 ${summary.min_score}`}
+          </div>
+          <div>
             <span className="label">出場規則</span>
             {detail.max_hold_days != null && `最長持有 ${detail.max_hold_days} 天　`}
             {detail.stop_loss_percent != null && `停損 ${detail.stop_loss_percent}%　`}

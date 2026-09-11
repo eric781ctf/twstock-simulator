@@ -404,6 +404,8 @@ class ModelTrainRequest(BaseModel):
     validation_mode: Literal["single", "walk_forward"] = "single"
     feature_scaling: Literal["zscore", "cross_sectional_rank"] = "cross_sectional_rank"
     industry_neutral: bool = False
+    # 分數低於這個值就不買。None = 不設限，永遠買滿前 10 名
+    min_score: float | None = Field(default=None, ge=-5, le=15)
     walk_forward_config: WalkForwardConfigIn | None = None
 
     min_hold_days: int | None = Field(default=None, ge=0, le=250)
@@ -451,6 +453,7 @@ class ModelSummaryOut(BaseModel):
     feature_scaling: str = "zscore"
     feature_scaling_label: str = ""
     industry_neutral: bool = False
+    min_score: float | None = None
     score_formula: str
     training_duration_seconds: float | None
     # 訓練途中才有值（階段、第幾個 epoch、當下的 loss），完成或失敗後回到 None

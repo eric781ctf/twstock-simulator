@@ -37,6 +37,9 @@ def run_lightweight_migrations(engine: Engine) -> None:
             )
         )
         conn.execute(
+            text("ALTER TABLE prediction_models ADD COLUMN IF NOT EXISTS min_score DOUBLE PRECISION")
+        )
+        conn.execute(
             text(
                 "ALTER TABLE prediction_models ADD COLUMN IF NOT EXISTS "
                 "validation_mode VARCHAR(20) NOT NULL DEFAULT 'single'"
