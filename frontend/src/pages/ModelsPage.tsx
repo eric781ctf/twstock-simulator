@@ -126,8 +126,10 @@ export default function ModelsPage() {
         </div>
 
         <div className="model-list-controls">
+          {/* 每段文字都包在自己的 span 裡。裸文字節點在 flex 容器裡會變成匿名
+              flex item，被壓縮時中文哪裡都能斷，「顯示已封存」會斷成三行 */}
           <label className="model-sort">
-            排序
+            <span>排序</span>
             <select value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)}>
               {SORT_OPTIONS[tab].map((o) => (
                 <option key={o.key} value={o.key}>
@@ -136,14 +138,17 @@ export default function ModelsPage() {
               ))}
             </select>
           </label>
-          <label className="model-archive-toggle">
-            <input
-              type="checkbox"
-              checked={showArchived}
-              onChange={(e) => setShowArchived(e.target.checked)}
-            />
-            顯示已封存{archivedCount > 0 && `（${archivedCount}）`}
-          </label>
+          {archivedCount > 0 && (
+            <button
+              type="button"
+              className={`model-chip ${showArchived ? "active" : ""}`}
+              aria-pressed={showArchived}
+              onClick={() => setShowArchived((v) => !v)}
+            >
+              <span>含已封存</span>
+              <span className="model-chip-count">{archivedCount}</span>
+            </button>
+          )}
         </div>
       </div>
 
