@@ -462,6 +462,20 @@ class ModelSummaryOut(BaseModel):
     closed_holding_count: int
     average_realized_return_percent: float | None
     average_unrealized_return_percent: float | None
+    # 目前持有的整體損益率：總市值比總成本（每檔各一股，所以是價格加權，
+    # 跟上面那個等權平均是兩個不同的數字）
+    total_unrealized_return_percent: float | None = None
+
+    # ── 訓練期的成績，讓列表頁不用逐一點進詳情才看得到 ──
+    # 滾動驗證時是各折的平均；單次切分時就是那一次的測試分數
+    test_rank_ic: float | None = None
+    test_rank_ic_std: float | None = None
+    test_auc: float | None = None
+    fold_count: int | None = None
+    positive_folds: int | None = None
+    backtest_average_return_percent: float | None = None
+    backtest_win_rate: float | None = None
+    backtest_holding_count: int | None = None
 
 
 class ModelHoldingOut(BaseModel):

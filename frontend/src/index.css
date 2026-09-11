@@ -558,10 +558,85 @@ tbody tr:hover {
   font-weight: 600;
 }
 
-.model-card-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+/* 一行一張卡。卡片內的數字是拿來互相比較的，並排成格狀時同一個欄位
+   不在同一條垂直線上，眼睛要跳著看；單欄排列讓同名欄位自然對齊。 */
+.model-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.model-list-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.model-tabs {
+  display: flex;
+  gap: 8px;
+}
+
+.model-tab {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--muted);
+  border-radius: 10px;
+  padding: 9px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--font-ui);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.model-tab:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.model-tab.active {
+  background: var(--accent-gradient);
+  color: #05070d;
+  border-color: transparent;
+  box-shadow: var(--glow-accent);
+}
+
+.model-list-controls {
+  display: flex;
+  align-items: center;
   gap: 16px;
+  flex-wrap: wrap;
+}
+
+.model-sort {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.model-sort select {
+  font-size: 12px;
+  padding: 7px 10px;
+}
+
+.model-archive-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.model-archive-toggle input {
+  cursor: pointer;
 }
 
 .model-card {
@@ -608,8 +683,18 @@ tbody tr:hover {
 
 .model-card-stats {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 10px;
+}
+
+@media (max-width: 720px) {
+  .model-card-stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .model-list-toolbar {
+    align-items: stretch;
+  }
 }
 
 .model-card-stats .stat {
@@ -620,6 +705,13 @@ tbody tr:hover {
 
 .model-card-stats .stat .label {
   font-size: 11px;
+  color: var(--muted);
+}
+
+.model-card-stats .stat .value .value-suffix {
+  margin-left: 5px;
+  font-size: 11px;
+  font-weight: 500;
   color: var(--muted);
 }
 

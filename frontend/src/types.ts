@@ -448,6 +448,18 @@ export interface ModelSummary {
   closed_holding_count: number;
   average_realized_return_percent: number | null;
   average_unrealized_return_percent: number | null;
+  /** 目前持有的整體損益率：總市值比總成本（每檔各一股，價格加權） */
+  total_unrealized_return_percent: number | null;
+
+  /** 滾動驗證時是各折平均；單次切分時是那一次的測試分數 */
+  test_rank_ic: number | null;
+  test_rank_ic_std: number | null;
+  test_auc: number | null;
+  fold_count: number | null;
+  positive_folds: number | null;
+  backtest_average_return_percent: number | null;
+  backtest_win_rate: number | null;
+  backtest_holding_count: number | null;
 }
 
 export interface SchedulerFlag {
