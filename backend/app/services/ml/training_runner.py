@@ -35,7 +35,7 @@ from app.services.ml.dataset import (
     to_matrix,
 )
 from app.services.industry_sync import load_industry_map
-from app.services.ml.features import MARKET_FEATURE_KEYS, WARMUP_BARS, build_feature_rows
+from app.services.ml.features import CROSS_SECTION_SKIP_KEYS, WARMUP_BARS, build_feature_rows
 from app.services.ml.selection import ModelBundle
 from app.services.ml.train import SEQUENCE_MODEL_TYPES, train_dual_task
 from app.services.ml.walk_forward import (
@@ -172,13 +172,13 @@ def _prepare_rows(db: Session, model: PredictionModel, feature_keys: list[str], 
     # 而且必須在切分之前做——每折各自排名的話，同一天的同一檔股票會因為
     # 落在不同折而拿到不同的名次，那是沒有意義的
     if model.feature_scaling == SCALING_RANK:
-        labeled = rank_normalize(labeled, feature_keys, skip=set(MARKET_FEATURE_KEYS))
+        labeled = rank_normalize(labeled, feature_keys, skip=set(CROSS_SECTION_SKIP_KEYS))
 
     # 產業中性化排在排名之後：兩者都是「同一天的橫斷面」運算，先排名再減同業
     # 中位數，得到的是「這檔在同業裡的相對名次」，比直接減原始值穩定
     if model.industry_neutral:
         labeled = industry_neutralize(
-            labeled, feature_keys, load_industry_map(db), skip=set(MARKET_FEATURE_KEYS)
+            labeled, feature_keys, load_industry_map(db), skip=set(CROSS_SECTION_SKIP_KEYS)
         )
 
     return labeled, bars_by_code
