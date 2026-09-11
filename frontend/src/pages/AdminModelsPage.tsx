@@ -111,6 +111,7 @@ export default function AdminModelsPage() {
   const [subsample, setSubsample] = useState("0.8");
   const [colsample, setColsample] = useState("0.8");
   const [minChildSamples, setMinChildSamples] = useState("20");
+  const [nJobs, setNJobs] = useState("2");
   const [dates, setDates] = useState({
     train_start: "",
     train_end: "",
@@ -233,6 +234,7 @@ export default function AdminModelsPage() {
             subsample: Number(subsample),
             colsample: Number(colsample),
             min_child_samples: Number(minChildSamples),
+            n_jobs: Number(nJobs),
           }
         : null,
       min_hold_days: optionalNumber(minHold),
@@ -455,7 +457,23 @@ export default function AdminModelsPage() {
                     onChange={(e) => setMinChildSamples(e.target.value)}
                   />
                 </label>
+                <label>
+                  n_jobs
+                  <input
+                    type="number"
+                    min={1}
+                    max={64}
+                    value={nJobs}
+                    onChange={(e) => setNJobs(e.target.value)}
+                  />
+                </label>
               </div>
+              <p className="order-hint">
+                <b>n_jobs 是用幾個執行緒訓練，只影響速度不影響結果。</b>
+                每個執行緒都要自己的直方圖與節點統計，所以<b>記憶體用量大致跟著它走</b>——
+                這個系統的瓶頸是記憶體不是 CPU，調太大會直接 OOM。先小幅往上加、確認資源還有餘裕再繼續。
+                訓練一次只跑一個模型，同時送出多個會排隊等前一個跑完，不會有兩個訓練一起搶記憶體。
+              </p>
               <p className="order-hint">
                 <b>train 分數遠高於 test 時，這裡是第一個該動的地方。</b>
                 減少 n_estimators、降低 max_depth、調高 min_child_samples、把 subsample / colsample
@@ -773,6 +791,11 @@ export default function AdminModelsPage() {
                     <td>{m.model_type}</td>
                     <td className={`model-status-${m.status}`}>
                       {STATUS_LABEL[m.status]}
+                      {m.status === "queued" && m.queue_position != null && (
+                        <div className="model-progress">
+                          {m.queue_position === 0 ? "下一個" : `前面還有 ${m.queue_position} 個`}
+                        </div>
+                      )}
                       {progressText(m) && <div className="model-progress">{progressText(m)}</div>}
                     </td>
                     <td>{formatDuration(m.training_duration_seconds)}</td>

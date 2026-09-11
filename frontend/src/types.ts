@@ -206,6 +206,8 @@ export interface TreeConfigInput {
   subsample: number;
   colsample: number;
   min_child_samples: number;
+  /** 訓練用幾個執行緒。記憶體用量大致跟著它走，調大之前先看資源餘裕 */
+  n_jobs: number;
 }
 
 export interface NetworkConfigInput {
@@ -424,6 +426,8 @@ export interface ModelSummary {
   version: number;
   model_type: ModelType;
   status: ModelStatus;
+  /** 佇列裡前面還卡著幾筆。0 = 正在跑，null = 不在佇列裡 */
+  queue_position: number | null;
   is_archived: boolean;
   n_days: number;
   threshold_percent: number;

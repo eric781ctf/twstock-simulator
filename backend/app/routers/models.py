@@ -4,7 +4,6 @@
 版本就馬上回應——不能讓 HTTP 請求等在那裡，訓練動輒數十秒到數分鐘。
 """
 
-import asyncio
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -38,7 +37,12 @@ from app.services.ml.train import (
     SCORE_FORMULA_INFO,
     SCORE_FORMULA_KEY,
 )
-from app.services.ml.training_runner import run_training_job, suggest_split_dates
+from app.services.ml.training_runner import (
+    count_ahead,
+    enqueue_training,
+    queue_position,
+    suggest_split_dates,
+)
 from app.services.strategy_conditions import ConditionValidationError, validate_conditions
 
 logger = logging.getLogger(__name__)
@@ -70,9 +74,12 @@ def get_train_defaults(db: Session = Depends(get_db), _: User = Depends(require_
     )
 
 
-def _to_summary(model: PredictionModel, stats: dict) -> ModelSummaryOut:
+def _to_summary(
+    model: PredictionModel, stats: dict, ahead_counts: dict[int, int] | None = None
+) -> ModelSummaryOut:
     return ModelSummaryOut(
         id=model.id,
+        queue_position=queue_position(model, ahead_counts or {}),
         model_family=model.model_family,
         version=model.version,
         model_type=model.model_type,
@@ -103,7 +110,8 @@ def _to_summary(model: PredictionModel, stats: dict) -> ModelSummaryOut:
 def list_models(db: Session = Depends(get_db), _: User = Depends(require_admin)):
     models = db.query(PredictionModel).order_by(PredictionModel.id.desc()).all()
     stats = summarize_holdings(db, [m.id for m in models])
-    return [_to_summary(m, stats.get(m.id, {})) for m in models]
+    ahead = count_ahead(db, [m.id for m in models])
+    return [_to_summary(m, stats.get(m.id, {}), ahead) for m in models]
 
 
 @router.post("", response_model=ModelSummaryOut, status_code=201)
@@ -160,7 +168,7 @@ async def create_model(
     db.commit()
     db.refresh(model)
 
-    asyncio.create_task(run_training_job(model.id))
+    enqueue_training(model.id)
     logger.info("已排入訓練：模型 %d（%s v%d）", model.id, model.model_family, model.version)
     return _to_summary(model, {})
 

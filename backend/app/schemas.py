@@ -280,6 +280,9 @@ class TreeConfigIn(BaseModel):
     subsample: float = Field(default=0.8, gt=0, le=1)
     colsample: float = Field(default=0.8, gt=0, le=1)
     min_child_samples: int = Field(default=20, ge=1, le=10000)
+    # 上限刻意不綁機器核心數：容器看得到的核心數跟實際配額不一定一樣，
+    # 綁了反而會在換機器時莫名其妙擋下合法的設定。記憶體風險寫在表單提示。
+    n_jobs: int = Field(default=2, ge=1, le=64)
 
 
 class WalkForwardConfigIn(BaseModel):
@@ -436,6 +439,9 @@ class ModelSummaryOut(BaseModel):
     version: int
     model_type: str
     status: str
+    # 佇列裡前面還卡著幾筆。0 = 正在跑，None = 不在佇列裡（已完成或失敗）。
+    # 訓練一次只能跑一個，所以排隊是常態而不是異常狀況
+    queue_position: int | None = None
     is_archived: bool
     n_days: int
     threshold_percent: float

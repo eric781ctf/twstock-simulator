@@ -47,6 +47,11 @@ DEFAULT_TREE_CONFIG: dict = {
     "subsample": 0.8,
     "colsample": 0.8,
     "min_child_samples": 20,
+    # 訓練用幾個執行緒。刻意不預設成「有幾核就用幾核」：每個執行緒都要自己的
+    # 直方圖與節點統計，記憶體用量大致跟著執行緒數走，而這個系統真正的瓶頸是
+    # 記憶體不是 CPU（特徵是 list of dict，一列 115 個 key 就要 6KB）。
+    # 調大之前先確認記憶體還有餘裕，OOM 比慢更難處理。
+    "n_jobs": 2,
 }
 
 # 名稱一律只寫英文：這些演算法的通用名稱就是英文，中文譯名反而各家不一。
@@ -78,6 +83,7 @@ def build_models(model_type: str, tree_config: dict | None = None):
     subsample = float(config["subsample"])
     colsample = float(config["colsample"])
     min_child = int(config["min_child_samples"])
+    n_jobs = int(config["n_jobs"])
 
     if model_type == "xgboost":
         from xgboost import XGBClassifier, XGBRegressor
@@ -92,7 +98,7 @@ def build_models(model_type: str, tree_config: dict | None = None):
             # 平方誤差的 hessian 是 1，所以對迴歸頭它就等於樣本數；但分類頭用
             # logloss，hessian 是 p(1-p) ≤ 0.25，同樣的數字會比迴歸頭更嚴格。
             "min_child_weight": min_child,
-            "n_jobs": 2,
+            "n_jobs": n_jobs,
         }
         return XGBRegressor(**common), XGBClassifier(**common, eval_metric="logloss")
 
@@ -109,7 +115,7 @@ def build_models(model_type: str, tree_config: dict | None = None):
             "subsample_freq": 1,
             "colsample_bytree": colsample,
             "min_child_samples": min_child,
-            "n_jobs": 2,
+            "n_jobs": n_jobs,
             "verbose": -1,
         }
         return LGBMRegressor(**common), LGBMClassifier(**common)
@@ -123,7 +129,7 @@ def build_models(model_type: str, tree_config: dict | None = None):
             "max_samples": subsample,
             "max_features": colsample,
             "min_samples_leaf": min_child,
-            "n_jobs": 2,
+            "n_jobs": n_jobs,
             "random_state": 42,
         }
         return RandomForestRegressor(**common), RandomForestClassifier(**common)
