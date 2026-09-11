@@ -558,10 +558,127 @@ tbody tr:hover {
   font-weight: 600;
 }
 
-.model-card-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 16px;
+/* 一行一張卡。卡片內的數字是拿來互相比較的，並排成格狀時同一個欄位
+   不在同一條垂直線上，眼睛要跳著看；單欄排列讓同名欄位自然對齊。 */
+.model-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.model-list-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.model-tabs {
+  display: flex;
+  gap: 8px;
+}
+
+.model-tab {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--muted);
+  border-radius: 10px;
+  padding: 9px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--font-ui);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.model-tab:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.model-tab.active {
+  background: var(--accent-gradient);
+  color: #05070d;
+  border-color: transparent;
+  box-shadow: var(--glow-accent);
+}
+
+.model-list-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* 這一排全部不換行。控制項的標籤是短詞，斷行之後只會變難讀——
+   寬度不夠時是整個工具列換行（由 .model-list-toolbar 負責），不是字換行 */
+.model-list-controls,
+.model-sort,
+.model-chip {
+  white-space: nowrap;
+}
+
+.model-sort {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.model-sort select {
+  font-size: 13px;
+  padding: 8px 12px;
+  /* 全域的 input/select 有 margin-bottom:10px，那是給直式表單欄位用的。
+     這裡是橫向排列，留著會讓整排高 10px、而且「排序」兩個字對不齊選單中線 */
+  margin-bottom: 0;
+  /* 固定下限，不然換分頁時選項字數不同會讓控制項跟著變寬，整排跳一下 */
+  min-width: 240px;
+}
+
+/* 跟分頁按鈕同一種視覺語言。原本是一個裸的 checkbox 貼在漸層膠囊旁邊，
+   看起來像沒做完 */
+.model-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--muted);
+  border-radius: 10px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: var(--font-ui);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.model-chip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.model-chip.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--panel-hover);
+}
+
+.model-chip-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: var(--border);
+  color: var(--text);
+}
+
+.model-chip.active .model-chip-count {
+  background: var(--accent);
+  color: #05070d;
 }
 
 .model-card {
@@ -600,6 +717,17 @@ tbody tr:hover {
   color: var(--muted);
 }
 
+.model-card-created {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .model-card-meta {
   font-size: 12px;
   color: var(--muted);
@@ -608,8 +736,28 @@ tbody tr:hover {
 
 .model-card-stats {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 10px;
+}
+
+@media (max-width: 720px) {
+  .model-card-stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .model-list-toolbar {
+    align-items: stretch;
+    justify-content: flex-start;
+  }
+
+  .model-sort select {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .model-list-controls {
+    width: 100%;
+  }
 }
 
 .model-card-stats .stat {
@@ -620,6 +768,13 @@ tbody tr:hover {
 
 .model-card-stats .stat .label {
   font-size: 11px;
+  color: var(--muted);
+}
+
+.model-card-stats .stat .value .value-suffix {
+  margin-left: 5px;
+  font-size: 11px;
+  font-weight: 500;
   color: var(--muted);
 }
 

@@ -41,7 +41,11 @@ from app.services.ml.train import (
     SCORE_FORMULA_INFO,
     SEQUENCE_MODEL_TYPES,
 )
-from app.services.ml.performance import latest_close_prices, summarize_holdings
+from app.services.ml.performance import (
+    latest_close_prices,
+    summarize_holdings,
+    training_metrics_summary,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +109,8 @@ def _summary(model: PredictionModel, stats: dict) -> ModelSummaryOut:
         closed_holding_count=stats.get("closed_holding_count", 0),
         average_realized_return_percent=stats.get("average_realized_return_percent"),
         average_unrealized_return_percent=stats.get("average_unrealized_return_percent"),
+        total_unrealized_return_percent=stats.get("total_unrealized_return_percent"),
+        **training_metrics_summary(model),
     )
 
 

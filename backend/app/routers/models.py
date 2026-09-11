@@ -27,7 +27,7 @@ from app.services.ml import artifacts
 from app.services.ml.dataset import LABEL_MODE_LABELS, SCALING_MODE_LABELS
 from app.services.ml.features import DEFAULT_FEATURES, FEATURE_KEYS, FEATURE_LABELS, FEATURE_PRESETS
 from app.services.ml.inference import latest_bar_date
-from app.services.ml.performance import summarize_holdings
+from app.services.ml.performance import summarize_holdings, training_metrics_summary
 from app.services.ml.train import (
     MODEL_TYPE_LABELS,
     MODEL_TYPES,
@@ -103,6 +103,8 @@ def _to_summary(
         closed_holding_count=stats.get("closed_holding_count", 0),
         average_realized_return_percent=stats.get("average_realized_return_percent"),
         average_unrealized_return_percent=stats.get("average_unrealized_return_percent"),
+        total_unrealized_return_percent=stats.get("total_unrealized_return_percent"),
+        **training_metrics_summary(model),
     )
 
 
