@@ -75,8 +75,10 @@ def simulate_trading(
     open_positions: list[OpenPosition] = []
     closed: list[dict] = []
 
-    for today in trading_days:
+    for i, today in enumerate(trading_days):
         rows_today = rows_by_date[today]
+        # 進場訊號取前一個交易日。第一天沒有前一天，所以只做出場判斷
+        signal_rows = rows_by_date[trading_days[i - 1]] if i > 0 else []
         bars_until_today = {}
         for row in rows_today:
             code = row["stock_code"]
@@ -85,7 +87,7 @@ def simulate_trading(
                 bars_until_today[code] = bars_by_code[code][: index + 1]
 
         exits, entries = run_daily_cycle(
-            model, bundle, today, rows_today, bars_until_today, open_positions
+            model, bundle, today, rows_today, signal_rows, bars_until_today, open_positions
         )
 
         for action in exits:

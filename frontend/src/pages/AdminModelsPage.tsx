@@ -86,6 +86,7 @@ export default function AdminModelsPage() {
   const [validationMode, setValidationMode] = useState<ValidationMode>("walk_forward");
   const [featureScaling, setFeatureScaling] = useState<FeatureScaling>("cross_sectional_rank");
   const [industryNeutral, setIndustryNeutral] = useState(false);
+  const [minScore, setMinScore] = useState("");
   const [wfTrain, setWfTrain] = useState("6");
   const [wfValidation, setWfValidation] = useState("2");
   const [wfTest, setWfTest] = useState("2");
@@ -204,6 +205,7 @@ export default function AdminModelsPage() {
       validation_mode: validationMode,
       feature_scaling: featureScaling,
       industry_neutral: industryNeutral,
+      min_score: optionalNumber(minScore),
       walk_forward_config:
         validationMode === "walk_forward"
           ? {
@@ -375,6 +377,16 @@ export default function AdminModelsPage() {
               <input type="number" step="0.1" value={threshold} onChange={(e) => setThreshold(e.target.value)} />
             </label>
             <label>
+              最低選股分數
+              <input
+                type="number"
+                step="0.1"
+                placeholder="留空 = 不設限"
+                value={minScore}
+                onChange={(e) => setMinScore(e.target.value)}
+              />
+            </label>
+            <label>
               預期報酬權重 w₁
               <input type="number" step="0.1" value={returnWeight} onChange={(e) => setReturnWeight(e.target.value)} />
             </label>
@@ -388,6 +400,15 @@ export default function AdminModelsPage() {
               />
             </label>
           </div>
+          <p className="order-hint">
+            <b>最低選股分數</b>是「分數沒到這個水準就不買，寧可持股不滿」。分數是把預期報酬與達標機率
+            各自做<b>當天全市場的 z-score</b> 之後加權平均，0 就是當天的平均水準。
+            <b>但門檻要設在 2.5 以上才有作用</b>——前 10 名是從約 1300 檔裡挑出來的，本來就落在 99.2
+            百分位，實測分數大多在 2.4~7.9 之間。實測每 14 天可進場 140 檔的情況下，門檻 4.0 會減到
+            69 檔、5.0 減到 20 檔、6.0 只剩 8 檔。
+            它是<b>相對</b>門檻不是報酬保證——市場整體很差的那幾天，分數最高的那檔可能依然會跌。
+            留空就是不設限，永遠買滿前 10 名。
+          </p>
 
           {isTree && (
             <>

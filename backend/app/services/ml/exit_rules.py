@@ -23,6 +23,28 @@ EXIT_TAKE_PROFIT = "take_profit"
 EXIT_RULE_CONDITION = "rule_condition"
 
 
+# 台股漲跌幅上限 10%，但實際的漲跌停價會因為股價跳動單位而略低於 10%，
+# 所以判定門檻取 9.5%（跟 Qlib 的 limit_threshold 同一個做法）
+LIMIT_MOVE_THRESHOLD = 0.095
+
+
+def limit_state(bars: list[DailyBar]) -> str | None:
+    """今天是收在漲停、跌停、還是都不是。
+
+    這件事必須進回測：**漲停沒有賣方，買不到；跌停沒有買方，賣不掉。**
+    不擋的話，模型會大量選到「當天已經攻上漲停」的股票，回測用一個實際上
+    拿不到的價格成交——實測有 28% 的進場落在漲停日。
+    """
+    if len(bars) < 2 or bars[-2].close <= 0:
+        return None
+    change = bars[-1].close / bars[-2].close - 1
+    if change >= LIMIT_MOVE_THRESHOLD:
+        return "up"
+    if change <= -LIMIT_MOVE_THRESHOLD:
+        return "down"
+    return None
+
+
 def net_return_percent(entry_price: float, exit_price: float) -> float:
     """扣掉真實交易成本後的損益率（%）。
 

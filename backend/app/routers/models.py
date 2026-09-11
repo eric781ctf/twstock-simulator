@@ -93,6 +93,7 @@ def _to_summary(
         feature_scaling=model.feature_scaling,
         feature_scaling_label=SCALING_MODE_LABELS.get(model.feature_scaling, model.feature_scaling),
         industry_neutral=model.industry_neutral,
+        min_score=model.min_score,
         score_formula=model.score_formula,
         training_duration_seconds=model.training_duration_seconds,
         training_progress=model.training_progress,
@@ -150,6 +151,7 @@ async def create_model(
         validation_mode=payload.validation_mode,
         feature_scaling=payload.feature_scaling,
         industry_neutral=payload.industry_neutral,
+        min_score=payload.min_score,
         walk_forward_config=(
             payload.walk_forward_config.model_dump() if payload.walk_forward_config else None
         ),

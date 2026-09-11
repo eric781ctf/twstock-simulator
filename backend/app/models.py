@@ -298,6 +298,9 @@ class PredictionModel(Base):
     feature_scaling: Mapped[str] = mapped_column(String(30), nullable=False, default="zscore")
     # 是否把特徵減掉當天同產業的中位數
     industry_neutral: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # 選股分數的下限。低於這個分數就不買，寧可持股不滿。分數是當天全市場的
+    # z-score 加權平均，所以 0 = 當天平均水準，門檻是相對的而不是絕對報酬
+    min_score: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     # 出場規則（四層，依序判斷，見 services/ml/exit_rules.py）
     min_hold_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
