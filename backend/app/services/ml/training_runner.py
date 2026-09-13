@@ -297,6 +297,7 @@ def _folds_for(model: PredictionModel) -> list[Fold]:
         validation_months=int(config.get("validation_months", DEFAULT_VALIDATION_MONTHS)),
         test_months=int(config.get("test_months", DEFAULT_TEST_MONTHS)),
         step_months=int(config.get("step_months", DEFAULT_STEP_MONTHS)),
+        max_folds=int(config.get("max_folds", MAX_FOLDS)),
     )
     if not folds:
         raise ValueError(
