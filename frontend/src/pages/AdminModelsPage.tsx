@@ -91,6 +91,9 @@ export default function AdminModelsPage() {
   const [wfValidation, setWfValidation] = useState("2");
   const [wfTest, setWfTest] = useState("2");
   const [wfStep, setWfStep] = useState("2");
+  const [embargoDays, setEmbargoDays] = useState("1");
+  const [cpcvGroups, setCpcvGroups] = useState("6");
+  const [cpcvTestGroups, setCpcvTestGroups] = useState("2");
   const [returnWeight, setReturnWeight] = useState("0.5");
   const [probabilityWeight, setProbabilityWeight] = useState("0.5");
   const [minHold, setMinHold] = useState("2");
@@ -207,8 +210,15 @@ export default function AdminModelsPage() {
       industry_neutral: industryNeutral,
       min_score: optionalNumber(minScore),
       walk_forward_config:
-        validationMode === "walk_forward"
+        validationMode === "cpcv"
           ? {
+              embargo_days: Number(embargoDays),
+              cpcv_groups: Number(cpcvGroups),
+              cpcv_test_groups: Number(cpcvTestGroups),
+            }
+          : validationMode === "walk_forward"
+          ? {
+              embargo_days: Number(embargoDays),
               train_months: Number(wfTrain),
               validation_months: Number(wfValidation),
               test_months: Number(wfTest),
@@ -660,9 +670,46 @@ export default function AdminModelsPage() {
                 onChange={(e) => setValidationMode(e.target.value as ValidationMode)}
               >
                 <option value="walk_forward">滾動視窗（多折）</option>
+                <option value="cpcv">CPCV（組合式，多路徑）</option>
                 <option value="single">單次切分</option>
               </select>
             </label>
+            {validationMode === "cpcv" && (
+              <>
+                <label>
+                  分成幾組
+                  <input
+                    type="number"
+                    min={3}
+                    max={12}
+                    value={cpcvGroups}
+                    onChange={(e) => setCpcvGroups(e.target.value)}
+                  />
+                </label>
+                <label>
+                  每次測幾組
+                  <input
+                    type="number"
+                    min={1}
+                    max={4}
+                    value={cpcvTestGroups}
+                    onChange={(e) => setCpcvTestGroups(e.target.value)}
+                  />
+                </label>
+              </>
+            )}
+            {validationMode !== "single" && (
+              <label>
+                禁制天數
+                <input
+                  type="number"
+                  min={0}
+                  max={20}
+                  value={embargoDays}
+                  onChange={(e) => setEmbargoDays(e.target.value)}
+                />
+              </label>
+            )}
             {validationMode === "walk_forward" && (
               <>
                 <label>
@@ -691,7 +738,18 @@ export default function AdminModelsPage() {
             )}
           </div>
           <p className="order-hint">
-            {validationMode === "walk_forward" ? (
+            {validationMode === "cpcv" ? (
+              <>
+                把時間軸切成 N 組，窮舉「哪 k 組當測試」的所有組合（共 C(N,k) 種），
+                再把結果拼成 <b>C(N−1,k−1) 條完整覆蓋整段歷史的路徑</b>。
+                滾動視窗只給你<b>一條</b>路徑，分不出「這個 edge 是真的」還是「這條歷史剛好幸運」；
+                多條路徑才有績效的<b>分布</b>可看——重點是<b>有幾條路徑是正的</b>。
+                <br />
+                <b>但它不是在模擬實際上線。</b>測試組在中間時，訓練資料同時來自它的前後，
+                模型看過「未來」。要估計部署後的績效仍然要看滾動視窗；CPCV 回答的是
+                「這個結果有多可能只是運氣」。每個組合都要訓練一次，所以 N 調大會很慢。
+              </>
+            ) : validationMode === "walk_forward" ? (
               <>
                 同一組設定在多段不同時期各測一次，回報平均與<b>標準差</b>。
                 標準差才是重點——平均 Rank IC +0.02 但標準差 0.06 的訊號站不住腳，
