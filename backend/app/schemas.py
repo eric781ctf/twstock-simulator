@@ -292,6 +292,15 @@ class WalkForwardConfigIn(BaseModel):
     # 折數上限只是「別讓一次訓練無限長」的護欄，不是統計上的限制。
     # 資料夠長時調高，量測精度會跟著 √折數 改善
     max_folds: int = Field(default=12, ge=2, le=60)
+    # 每一折的訓練／驗證尾端要多空幾個交易日。label 長度（n_days）本身一定會
+    # 被砍掉，這是在那之上的額外緩衝——就算標籤不再重疊，緊鄰的兩段時間仍然
+    # 高度相關。López de Prado 建議約資料長度的 1%
+    embargo_days: int = Field(default=1, ge=0, le=20)
+    # CPCV 專用：時間軸切成幾組、每次抽幾組當測試。
+    # 組合數是 C(N,k)、路徑數是 C(N-1,k-1)，兩個都會隨 N 快速上升，
+    # 而每個組合都要訓練一次
+    cpcv_groups: int = Field(default=6, ge=3, le=12)
+    cpcv_test_groups: int = Field(default=2, ge=1, le=4)
     train_months: int = Field(default=6, ge=1, le=60)
     validation_months: int = Field(default=2, ge=1, le=24)
     test_months: int = Field(default=2, ge=1, le=24)
@@ -404,7 +413,7 @@ class ModelTrainRequest(BaseModel):
     score_weights: dict | None = None
     network_config: NetworkConfigIn | None = None
     tree_config: TreeConfigIn | None = None
-    validation_mode: Literal["single", "walk_forward"] = "single"
+    validation_mode: Literal["single", "walk_forward", "cpcv"] = "single"
     feature_scaling: Literal["zscore", "cross_sectional_rank"] = "cross_sectional_rank"
     industry_neutral: bool = False
     # 分數低於這個值就不買。None = 不設限，永遠買滿前 10 名

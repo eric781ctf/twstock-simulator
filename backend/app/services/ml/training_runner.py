@@ -24,6 +24,7 @@ from app.services.matching import TAIPEI_TZ
 from app.services.ml import artifacts
 from app.services.ml.backtest_eval import run_backtest
 from app.services.ml.dataset import (
+    purge_tail,
     SCALING_RANK,
     apply_scaler,
     attach_labels,
@@ -38,7 +39,8 @@ from app.services.industry_sync import load_industry_map
 from app.services.ml.frame import FeatureFrame
 from app.services.ml.features import CROSS_SECTION_SKIP_KEYS, WARMUP_BARS, build_feature_rows
 from app.services.ml.selection import ModelBundle
-from app.services.ml.train import SEQUENCE_MODEL_TYPES, train_dual_task
+from app.services.ml.train import SEQUENCE_MODEL_TYPES, _rank_ic, train_dual_task
+from app.services.ml import cpcv as cpcv_mod
 from app.services.ml.walk_forward import (
     DEFAULT_STEP_MONTHS,
     DEFAULT_TEST_MONTHS,
@@ -191,10 +193,20 @@ def _prepare_rows(db: Session, model: PredictionModel, feature_keys: list[str], 
     return labeled, bars_by_code
 
 
-def _split_fold(labeled: FeatureFrame, fold: Fold, sequence_length: int | None):
-    """依一折的六個日期界線切出三段，並回報哪一段是空的。"""
-    train_rows = split_by_date(labeled, fold.train_start, fold.train_end)
-    validation_rows = split_by_date(labeled, fold.validation_start, fold.validation_end)
+def _split_fold(
+    labeled: FeatureFrame, fold: Fold, sequence_length: int | None, purge_days: int = 0
+):
+    """依一折的六個日期界線切出三段，並回報哪一段是空的。
+
+    purge_days > 0 時，訓練段與驗證段的**尾端**會各砍掉那麼多個交易日。
+    這兩個邊界都需要處理：訓練尾端的標籤會延伸到驗證期，驗證尾端的標籤會
+    延伸到測試期——後者對有早停的神經網路特別要緊，因為模型的選擇會間接
+    受到測試期資料影響。測試段不砍，它是最後一段，後面沒有東西可洩漏。
+    """
+    train_rows = purge_tail(split_by_date(labeled, fold.train_start, fold.train_end), purge_days)
+    validation_rows = purge_tail(
+        split_by_date(labeled, fold.validation_start, fold.validation_end), purge_days
+    )
     test_rows = split_by_date(labeled, fold.test_start, fold.test_end)
 
     if sequence_length:
@@ -222,27 +234,46 @@ def _build_matrices(rows: FeatureFrame, feature_keys: list[str], sequence_length
     return to_matrix(rows, feature_keys)
 
 
-def _train_one_fold(
+# label 之外再多空幾個交易日。López de Prado 建議約資料長度的 1%，
+# 我們一折的訓練期約 120 個交易日，取 1 天
+DEFAULT_EMBARGO_DAYS = 1
+
+
+def _purge_days_for(model: PredictionModel) -> int:
+    """一折的邊界要砍掉幾個交易日 = label 長度 + embargo。
+
+    label 長度不是選項而是事實：n_days 就是每一筆樣本的答案往後看多遠，
+    所以那幾天必然重疊下一段。embargo 才是可調的保守加碼。
+    """
+    config = model.walk_forward_config or {}
+    embargo = int(config.get("embargo_days", DEFAULT_EMBARGO_DAYS))
+    return int(model.n_days) + max(embargo, 0)
+
+
+def _fit_and_evaluate(
     model: PredictionModel,
     feature_keys: list[str],
     sequence_length: int | None,
-    labeled: list[dict],
-    fold: Fold,
+    train_rows: FeatureFrame,
+    validation_rows: FeatureFrame,
+    test_rows: FeatureFrame,
     progress,
     fold_note: dict,
 ):
-    """訓練一折並回傳 (迴歸模型, 分類模型, metrics, 標準化參數, 測試列)。"""
-    train_rows, validation_rows, test_rows, empty = _split_fold(labeled, fold, sequence_length)
-    if empty:
-        raise ValueError(f"第 {fold.index} 折的{'、'.join(empty)}區間沒有任何樣本，請調整日期或先回補更多歷史")
+    """給定已經切好的三段，訓練並評估。
 
+    walk-forward 與 CPCV 只差在「怎麼切」——切完之後的訓練、標準化、評估
+    完全一樣，所以抽出來共用，兩邊才不會慢慢長出不一致的行為。
+
+    回傳 (迴歸模型, 分類模型, metrics, 標準化參數, 測試列)。
+    """
     x_train_raw, y_train_reg, y_train_clf = _build_matrices(train_rows, feature_keys, sequence_length)
     x_validation_raw, y_validation_reg, y_validation_clf = _build_matrices(
         validation_rows, feature_keys, sequence_length
     )
 
     # 標準化參數只用這一折的訓練集算。折與折之間不共用——共用等於讓後面的
-    # 折看到前面折的分布，正是 walk-forward 要避免的事
+    # 折看到前面折的分布，正是這類驗證要避免的事
     fit = fit_scaler_sequences if sequence_length else fit_scaler
     scaler_mean, scaler_std = fit(x_train_raw)
     x_train = apply_scaler(x_train_raw, scaler_mean, scaler_std)
@@ -268,10 +299,38 @@ def _train_one_fold(
     x_test_raw, y_test_reg, y_test_clf = _build_matrices(test_rows, feature_keys, sequence_length)
     x_test = apply_scaler(x_test_raw, scaler_mean, scaler_std)
     metrics["test"] = evaluate(regressor, classifier, x_test, y_test_reg, y_test_clf)
-    metrics["fold"] = fold.as_dict()
 
     del x_train, x_validation, x_test, x_train_raw, x_validation_raw, x_test_raw
     return regressor, classifier, metrics, (scaler_mean, scaler_std), test_rows
+
+
+def _train_one_fold(
+    model: PredictionModel,
+    feature_keys: list[str],
+    sequence_length: int | None,
+    labeled: FeatureFrame,
+    fold: Fold,
+    progress,
+    fold_note: dict,
+):
+    """切出一折再訓練。"""
+    purge_days = _purge_days_for(model)
+    train_rows, validation_rows, test_rows, empty = _split_fold(
+        labeled, fold, sequence_length, purge_days
+    )
+    if empty:
+        raise ValueError(f"第 {fold.index} 折的{'、'.join(empty)}區間沒有任何樣本，請調整日期或先回補更多歷史")
+
+    logger.info(
+        "第 %d 折：訓練 %d 列、驗證 %d 列、測試 %d 列（訓練與驗證尾端各淨化 %d 個交易日）",
+        fold.index, len(train_rows), len(validation_rows), len(test_rows), purge_days,
+    )
+    outcome = _fit_and_evaluate(
+        model, feature_keys, sequence_length, train_rows, validation_rows, test_rows,
+        progress, fold_note,
+    )
+    outcome[2]["fold"] = fold.as_dict()
+    return outcome
 
 
 def _folds_for(model: PredictionModel) -> list[Fold]:
@@ -334,6 +393,157 @@ def _walk_forward_warnings(summary: dict) -> list[str]:
     return warnings
 
 
+VALIDATION_CPCV = "cpcv"
+
+
+def _train_cpcv(model, feature_keys, sequence_length, labeled, progress) -> tuple:
+    """跑 CPCV：窮舉 C(N,k) 個組合，再把結果拼成多條路徑。
+
+    跟 walk-forward 的差別不只是切法。每個組合的訓練集是**好幾組的聯集**，
+    而且測試組可能夾在訓練資料中間——所以淨化要雙側做，這在 cpcv.purged_train_mask
+    裡處理。
+
+    回傳 (最後一個組合的訓練結果, 每組合的 metrics, 路徑彙總)。挑「最後一個」
+    當成要存檔的模型純粹是要有個東西可存；CPCV 的產出本來就是分布而不是
+    單一模型，真要上線應該用 walk-forward 的最後一折。
+    """
+    config = model.walk_forward_config or {}
+    n_groups = int(config.get("cpcv_groups", cpcv_mod.DEFAULT_GROUPS))
+    k = int(config.get("cpcv_test_groups", cpcv_mod.DEFAULT_TEST_GROUPS))
+    purge_days = int(model.n_days)
+    embargo_days = int(config.get("embargo_days", DEFAULT_EMBARGO_DAYS))
+
+    days = labeled.unique_dates()
+    groups = cpcv_mod.make_groups(days, n_groups)
+    splits = cpcv_mod.generate_splits(n_groups, k)
+    phi = cpcv_mod.path_count(n_groups, k)
+    logger.info(
+        "CPCV：%d 組、每次測 %d 組 → %d 個組合、%d 條路徑（淨化 %d 天、禁制 %d 天）",
+        n_groups, k, len(splits), phi, purge_days, embargo_days,
+    )
+
+    unique_days = np.unique(labeled.dates)
+    dates = labeled.dates
+    by_split: dict[int, dict] = {}
+    last = None
+
+    for split in splits:
+        note = {"fold": split.index, "total_folds": len(splits)}
+        train_mask = cpcv_mod.purged_train_mask(
+            dates, groups, split.train_groups, split.test_groups,
+            unique_days, purge_days, embargo_days,
+        )
+        # 驗證組也要跟測試組保持距離，理由跟訓練組一樣
+        val_mask = cpcv_mod.purged_train_mask(
+            dates, groups, (split.validation_group,), split.test_groups,
+            unique_days, purge_days, embargo_days,
+        )
+        test_mask = cpcv_mod.group_mask(dates, groups, split.test_groups)
+
+        train_rows = labeled.mask(train_mask)
+        validation_rows = labeled.mask(val_mask)
+        test_rows = labeled.mask(test_mask)
+        if sequence_length:
+            from app.services.ml.sequences import filter_rows_with_history
+
+            train_rows = filter_rows_with_history(train_rows, sequence_length)
+            validation_rows = filter_rows_with_history(validation_rows, sequence_length)
+            test_rows = filter_rows_with_history(test_rows, sequence_length)
+
+        empty = [n for n, r in (("訓練", train_rows), ("驗證", validation_rows), ("測試", test_rows)) if not r]
+        if empty:
+            raise ValueError(f"CPCV 組合 {split.index} 的{'、'.join(empty)}沒有任何樣本，請調小組數")
+
+        outcome = _fit_and_evaluate(
+            model, feature_keys, sequence_length, train_rows, validation_rows, test_rows,
+            progress, note,
+        )
+        metrics = outcome[2]
+        metrics["cpcv_split"] = split.as_dict()
+        # 逐組的分數：路徑要靠這個拼
+        metrics["group_rank_ic"] = {
+            str(g): _rank_ic_for_group(outcome, labeled, groups, g, feature_keys, sequence_length)
+            for g in split.test_groups
+        }
+        by_split[split.index] = metrics
+        last = outcome
+        logger.info(
+            "模型 %s CPCV 組合 %d/%d 完成：測試 RankIC=%s",
+            model.id, split.index, len(splits), metrics["test"]["rank_ic"],
+        )
+
+    # ── 拼路徑 ──
+    paths = cpcv_mod.assign_paths(splits, n_groups)
+    path_scores = []
+    for assignment in paths:
+        per_group = [
+            by_split[combo]["group_rank_ic"].get(str(g))
+            for g, combo in assignment.items()
+        ]
+        vals = [v for v in per_group if v is not None]
+        if vals:
+            path_scores.append(float(np.mean(vals)))
+
+    summary = {
+        "groups": [g.as_dict() for g in groups],
+        "n_groups": n_groups,
+        "test_groups": k,
+        "combination_count": len(splits),
+        "path_rank_ic": cpcv_mod.summarize_paths(path_scores),
+        "path_scores": [round(x, 6) for x in path_scores],
+    }
+    return last, list(by_split.values()), summary
+
+
+def _rank_ic_for_group(outcome, labeled, groups, g, feature_keys, sequence_length) -> float | None:
+    """單獨一組的 Rank IC。路徑是由「不同組合測同一組」的結果拼起來的，
+    所以要的是逐組分數，而不是整個測試集（k 組合在一起）的分數。"""
+    regressor, classifier, _, (mean, std), _ = outcome
+    rows = labeled.mask(cpcv_mod.group_mask(labeled.dates, groups, g))
+    if sequence_length:
+        from app.services.ml.sequences import filter_rows_with_history
+
+        rows = filter_rows_with_history(rows, sequence_length)
+    if len(rows) < 10:
+        return None
+    x_raw, y_reg, _ = _build_matrices(rows, feature_keys, sequence_length)
+    x = apply_scaler(x_raw, mean, std)
+    pred = np.asarray(regressor.predict(x), dtype=float)
+    return _rank_ic(pred, y_reg)
+
+
+def _cpcv_warnings(summary: dict) -> list[str]:
+    """CPCV 才問得出來的問題：這個 edge 是不是只在某一條歷史上成立。"""
+    stats = summary.get("path_rank_ic") or {}
+    if not stats:
+        return []
+    mean, std = stats["mean"], stats["std"]
+    positive, count = stats["positive_paths"], stats["count"]
+    warnings = [
+        f"CPCV 拼出 {count} 條路徑（{summary['n_groups']} 組、每次測 "
+        f"{summary['test_groups']} 組、共 {summary['combination_count']} 個組合），"
+        f"路徑 Rank IC 平均 {mean:+.4f}、標準差 {std:.4f}，{positive}/{count} 條為正。"
+    ]
+    if positive < count:
+        warnings.append(
+            f"有 {count - positive} 條路徑的 Rank IC 是負的。同一組設定在不同的"
+            "訓練/測試組合下會翻正負號，代表這個 edge 相當程度取決於「剛好用了"
+            "哪一段資料訓練」，不是穩定的預測能力。"
+        )
+    if std > abs(mean):
+        warnings.append(
+            f"路徑間的標準差（{std:.4f}）大於平均值（{mean:+.4f}）。這比"
+            "walk-forward 的折間標準差更值得擔心——後者混著不同市況的影響，"
+            "而路徑之間測的是同一段歷史，差異只來自訓練組合。"
+        )
+    warnings.append(
+        "注意 CPCV 的訓練集會包含測試期之後的資料，所以它**不是**在模擬實際"
+        "上線的樣子。它回答的是「這個 edge 有多可能只是運氣」，部署前的績效"
+        "估計仍然要看 walk-forward。"
+    )
+    return warnings
+
+
 def _train_sync(model_id: int) -> dict:
     """真正做事的地方，跑在獨立的 process 裡，所以自己開資料庫連線。"""
     db: Session = SessionLocal()
@@ -353,24 +563,30 @@ def _train_sync(model_id: int) -> dict:
         feature_keys = list(model.feature_config)
         sequence_length = _sequence_length_for(model)
         labeled, bars_by_code = _prepare_rows(db, model, feature_keys, sequence_length)
-        folds = _folds_for(model)
 
-        fold_metrics: list[dict] = []
-        last = None
-        for fold in folds:
-            note = {"fold": fold.index, "total_folds": len(folds)} if len(folds) > 1 else {}
-            outcome = _train_one_fold(
-                model, feature_keys, sequence_length, labeled, fold, progress, note
+        cpcv_summary = None
+        if model.validation_mode == VALIDATION_CPCV:
+            last, fold_metrics, cpcv_summary = _train_cpcv(
+                model, feature_keys, sequence_length, labeled, progress
             )
-            fold_metrics.append(outcome[2])
-            last = outcome
-            logger.info(
-                "模型 %d 第 %d/%d 折完成：測試 RankIC=%s",
-                model_id,
-                fold.index,
-                len(folds),
-                outcome[2]["test"]["rank_ic"],
-            )
+            folds = []
+        else:
+            folds = _folds_for(model)
+            fold_metrics, last = [], None
+            for fold in folds:
+                note = {"fold": fold.index, "total_folds": len(folds)} if len(folds) > 1 else {}
+                outcome = _train_one_fold(
+                    model, feature_keys, sequence_length, labeled, fold, progress, note
+                )
+                fold_metrics.append(outcome[2])
+                last = outcome
+                logger.info(
+                    "模型 %d 第 %d/%d 折完成：測試 RankIC=%s",
+                    model_id,
+                    fold.index,
+                    len(folds),
+                    outcome[2]["test"]["rank_ic"],
+                )
 
         regressor, classifier, metrics, (scaler_mean, scaler_std), test_rows = last
 
@@ -407,7 +623,14 @@ def _train_sync(model_id: int) -> dict:
             metrics["train"], metrics["validation"], metrics["test"], metrics.get("network")
         )
 
-        if len(folds) > 1:
+        if cpcv_summary is not None:
+            metrics["cpcv"] = cpcv_summary
+            metrics["folds"] = [
+                {"fold": m["cpcv_split"], "train": m["train"], "validation": m["validation"], "test": m["test"]}
+                for m in fold_metrics
+            ]
+            metrics["warnings"] = metrics["warnings"] + _cpcv_warnings(cpcv_summary)
+        elif len(folds) > 1:
             metrics["folds"] = [
                 {"fold": m["fold"], "train": m["train"], "validation": m["validation"], "test": m["test"]}
                 for m in fold_metrics

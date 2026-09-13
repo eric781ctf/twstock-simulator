@@ -128,6 +128,33 @@ def _market_return_between(
     return (end_level - start_level) / start_level * 100
 
 
+def purge_tail(rows: FeatureFrame, days: int) -> FeatureFrame:
+    """丟掉這一段尾端 N 個**交易日**的樣本。
+
+    為什麼需要：label 是「未來 n 天的報酬」，所以一筆樣本實際佔用的時間是
+    [t, t+n] 而不是 t。訓練期最後 n 天的樣本，它們的答案是由驗證期的價格決定
+    的——模型訓練時就看過那段漲跌，然後我們再用那段期間去評分它。
+
+    這就是 López de Prado 說的 purging。實測我們每一折約有 4.1% 的訓練樣本
+    落在這個區間裡。
+
+    N 通常取「label 長度 + embargo」。embargo 是額外的緩衝：就算標籤不再重疊，
+    緊鄰的兩段時間仍然高度相關（報酬有序列相關、特徵又是回看的滾動視窗），
+    空一小段能讓評估少一點樂觀偏差。
+
+    用交易日而不是日曆日——label 數的是 K 棒數，不是天數。
+    """
+    if days <= 0 or len(rows) == 0:
+        return rows
+    unique_days = np.unique(rows.dates)
+    if len(unique_days) <= days:
+        # 整段都在淨化範圍內。回空的比回原本的安全——呼叫端會當成
+        # 「這一折排不下」而報錯，總比默默用一段全是洩漏的資料訓練好
+        return rows.mask(np.zeros(len(rows), dtype=bool))
+    cutoff = unique_days[-days]
+    return rows.mask(rows.dates < cutoff)
+
+
 def split_by_date(rows: FeatureFrame, start: date, end: date) -> FeatureFrame:
     return rows.between(start, end)
 

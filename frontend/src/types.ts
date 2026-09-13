@@ -221,14 +221,20 @@ export interface NetworkConfigInput {
   batch_size: number;
 }
 export type LabelMode = "absolute" | "excess";
-export type ValidationMode = "single" | "walk_forward";
+export type ValidationMode = "single" | "walk_forward" | "cpcv";
 export type FeatureScaling = "zscore" | "cross_sectional_rank";
 
 export interface WalkForwardConfigInput {
-  train_months: number;
-  validation_months: number;
-  test_months: number;
-  step_months: number;
+  /** 滾動視窗專用。CPCV 不用這四個，後端對缺少的鍵有預設值 */
+  train_months?: number;
+  validation_months?: number;
+  test_months?: number;
+  step_months?: number;
+  /** 每折邊界要多空幾個交易日。label 長度本身一定會被砍，這是額外的緩衝 */
+  embargo_days?: number;
+  /** CPCV 專用：時間軸切成幾組、每次抽幾組當測試 */
+  cpcv_groups?: number;
+  cpcv_test_groups?: number;
 }
 
 export interface WalkForwardStat {
