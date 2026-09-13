@@ -78,11 +78,7 @@ def _build_input(bundle: ModelBundle, rows: list[dict]) -> np.ndarray:
 
         x = stack_sequences(rows, bundle.sequence_length)
     else:
-        x = np.zeros((len(rows), len(bundle.feature_keys)), dtype=np.float64)
-        for i, row in enumerate(rows):
-            for j, key in enumerate(bundle.feature_keys):
-                value = row.get(key)
-                x[i, j] = float(value) if value is not None and np.isfinite(float(value)) else np.nan
+        x = rows.feature_matrix(bundle.feature_keys)
     return apply_scaler(x, bundle.scaler_mean, bundle.scaler_std)
 
 
@@ -125,7 +121,12 @@ def run_daily_cycle(
     今天的收盤價，等於用一個當下取不到的價格成交。實測這個假設本身就佔了
     八成以上的回測績效，是整條管線裡最大的一個 look-ahead。
     """
-    price_today = {row["stock_code"]: row["close"] for row in rows_today}
+    # 一定要轉成 Python float：矩陣取出來的是 np.float64，psycopg2 不認得它，
+    # 寫進 ModelHolding 時會變成 SQL 裡的 "np.float64(...)" 字面值而爆掉
+    price_today = {
+        code: float(close)
+        for code, close in zip(rows_today.stock_codes(), rows_today.column("close"))
+    }
 
     exits: list[ExitAction] = []
     still_held: set[str] = set()
@@ -157,21 +158,25 @@ def run_daily_cycle(
 
     # 今天買得到的價格。訊號來自昨天，但成交價與漲跌停都要看今天
     tradable = {
-        row["stock_code"]: float(row["close"])
-        for row in rows_today
-        if limit_state(bars_until_today.get(row["stock_code"], [])) != "up"
+        code: float(close)
+        for code, close in zip(rows_today.stock_codes(), rows_today.column("close"))
+        if limit_state(bars_until_today.get(code, [])) != "up"
     }
-    candidates = [
-        row
-        for row in signal_rows
-        if row["stock_code"] not in still_held and row["stock_code"] in tradable
-    ]
+    signal_codes = signal_rows.stock_codes()
+    keep = np.array(
+        [c not in still_held and c in tradable for c in signal_codes], dtype=bool
+    )
+    candidates = signal_rows.mask(keep)
+    candidate_codes = signal_codes[keep]
     if bundle.sequence_length:
         # 序列模型對「前面歷史不足 T 天」的股票根本算不出分數（剛上市、或本地
         # 日K還沒回補到那麼早）。這些直接不列入候選，不用補零硬湊一段假歷史。
         from app.services.ml.sequences import filter_rows_with_history
 
+        before = len(candidates)
         candidates = filter_rows_with_history(candidates, bundle.sequence_length)
+        if len(candidates) != before:
+            candidate_codes = candidates.stock_codes()
     if not candidates:
         return exits, []
 
@@ -187,9 +192,9 @@ def run_daily_cycle(
 
     entries = [
         EntryAction(
-            stock_code=candidates[i]["stock_code"],
+            stock_code=candidate_codes[i],
             # 訊號是昨天的，成交價是今天的
-            entry_price=tradable[candidates[i]["stock_code"]],
+            entry_price=tradable[candidate_codes[i]],
             score=float(scores[i]),
             predicted_return_percent=float(predicted_returns[i]),
             predicted_probability=float(probabilities[i]),

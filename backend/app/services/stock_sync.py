@@ -142,7 +142,14 @@ async def sync_valuations(db: Session) -> int:
     return count
 
 
-async def backfill_valuation_history(db: Session, months: int = VALUATION_BACKFILL_MONTHS) -> int:
+VALUATION_REQUEST_DELAY_SECONDS = 4.0  # 月份之間的間隔，避免一次連發數十個請求撞限流
+
+
+async def backfill_valuation_history(
+    db: Session,
+    months: int = VALUATION_BACKFILL_MONTHS,
+    request_delay: float = VALUATION_REQUEST_DELAY_SECONDS,
+) -> int:
     """回補 TWSE 上市股票過去約 N 個月的本益比／殖利率／股價淨值比月度快照
     （用官方「依日期查詢」端點，一次查一天可以拿到全部上市股票，效率很高）。
     TPEx 沒有這種依日期查詢的公開端點，回補不到，只能每日累積。
@@ -161,6 +168,8 @@ async def backfill_valuation_history(db: Session, months: int = VALUATION_BACKFI
     today = date.today()
 
     for i in range(months):
+        if i > 0:
+            await _throttled_sleep(request_delay, "估值快照月份之間的間隔")
         year = today.year
         month = today.month - i
         while month <= 0:
