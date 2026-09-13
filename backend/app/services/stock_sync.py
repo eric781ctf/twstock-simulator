@@ -142,7 +142,14 @@ async def sync_valuations(db: Session) -> int:
     return count
 
 
-async def backfill_valuation_history(db: Session, months: int = VALUATION_BACKFILL_MONTHS) -> int:
+VALUATION_REQUEST_DELAY_SECONDS = 4.0  # 月份之間的間隔，避免一次連發數十個請求撞限流
+
+
+async def backfill_valuation_history(
+    db: Session,
+    months: int = VALUATION_BACKFILL_MONTHS,
+    request_delay: float = VALUATION_REQUEST_DELAY_SECONDS,
+) -> int:
     """回補 TWSE 上市股票過去約 N 個月的本益比／殖利率／股價淨值比月度快照
     （用官方「依日期查詢」端點，一次查一天可以拿到全部上市股票，效率很高）。
     TPEx 沒有這種依日期查詢的公開端點，回補不到，只能每日累積。
@@ -161,6 +168,8 @@ async def backfill_valuation_history(db: Session, months: int = VALUATION_BACKFI
     today = date.today()
 
     for i in range(months):
+        if i > 0:
+            await _throttled_sleep(request_delay, "估值快照月份之間的間隔")
         year = today.year
         month = today.month - i
         while month <= 0:
@@ -181,6 +190,8 @@ async def backfill_valuation_history(db: Session, months: int = VALUATION_BACKFI
 
 DAILY_BY_DATE_DELAY_SECONDS = 5.0  # 逐日回補的請求間隔；一天一次請求，這個節奏遠低於限流門檻
 DAILY_BY_DATE_MIN_ROWS = 200  # 某一天本地已有這麼多筆上市日K，就當作那天補過了
+# 連續這麼多個平日回傳空資料就中止：台股最長的連假也不到兩週
+EMPTY_WEEKDAY_ABORT = 10
 
 
 async def backfill_twse_daily_bars_by_date(
@@ -234,6 +245,8 @@ async def backfill_twse_daily_bars_by_date(
 
     written = 0
     processed = 0
+    consecutive_empty = 0
+    last_empty = None
     try:
         async with httpx.AsyncClient(timeout=30, headers=_HEADERS) as client:
             for i, day in enumerate(pending_days):
@@ -253,7 +266,36 @@ async def backfill_twse_daily_bars_by_date(
 
                 processed += 1
                 if not quotes:
-                    continue  # 非交易日
+                    # 空回應有兩種可能：真的是非交易日，或者 TWSE 在軟性限流
+                    # （回 HTTP 200 但內容是空的，不會觸發 RateLimitedError）。
+                    # 分不出來，但可以用「連續幾個平日都空」來判斷——真正的
+                    # 連假最長也就一週，連續十個平日全空一定是被擋了。
+                    #
+                    # 不加這個判斷的話，被限流的那段會被當成非交易日靜靜跳過，
+                    # 最後還印出「完成」——實測一次回補就這樣漏掉八個月。
+                    if day.weekday() < 5:
+                        # 只有「日曆上相鄰」的平日才累計。重跑補洞時待補清單
+                        # 只剩假日，它們本來就回空，用「連續幾筆待補」去數的話
+                        # 一定會誤判成限流——要看的是日期有沒有連在一起
+                        if last_empty is not None and (day - last_empty).days <= 3:
+                            consecutive_empty += 1
+                        else:
+                            consecutive_empty = 1
+                        last_empty = day
+                        if consecutive_empty >= EMPTY_WEEKDAY_ABORT:
+                            logger.warning(
+                                "backfill_twse_daily_bars_by_date: 連續 %d 個平日回傳空資料，"
+                                "極可能被 TWSE 軟性限流，在 %s 中止本輪",
+                                consecutive_empty, day,
+                            )
+                            backfill_status.finish(
+                                backfill_status.PHASE_RATE_LIMITED,
+                                f"連續 {consecutive_empty} 個平日拿到空資料（疑似被限流），"
+                                f"本輪補到 {day} 為止，已寫入 {written} 筆；稍後重跑會從缺的地方接續",
+                            )
+                            return written
+                    continue
+                consecutive_empty = 0
 
                 for item in quotes:
                     if item["code"] not in known_codes:

@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 
 from app.models import DailyBar
+from app.services.ml.frame import FeatureFrame
 
 logger = logging.getLogger(__name__)
 
@@ -35,13 +36,13 @@ LABEL_MODE_LABELS: dict[str, str] = {
 
 
 def attach_labels(
-    rows: list[dict],
+    rows: FeatureFrame,
     bars_by_code: dict[str, list[DailyBar]],
     n_days: int,
     threshold_percent: float,
     label_mode: str = LABEL_ABSOLUTE,
     market_levels: dict[date, float] | None = None,
-) -> list[dict]:
+) -> FeatureFrame:
     """替每一列補上未來 n 個交易日的報酬率與是否達標。
 
     未來價格用「同一檔股票、往後數 n 根 K 棒」的收盤價；不足 n 根（也就是資料
@@ -58,44 +59,58 @@ def attach_labels(
 
     大盤報酬取的是「同樣的起訖日期」，不是「同樣的交易日數」：停牌過的股票
     第 n 根 K 棒可能落在比較晚的日期，這時候要比的是那段實際經過的期間。
+
+    沒有 label 的列（資料尾端不足 n 根）直接排除，回傳新的 FeatureFrame。
     """
-    close_index: dict[str, dict[date, int]] = {}
+    n = len(rows)
+    if n == 0:
+        return rows
+
+    # 每檔股票的「日期 → 第幾根K棒」索引，查未來第 n 根用
+    index_by_code: dict[str, dict[date, int]] = {}
+    closes_by_code: dict[str, list[float]] = {}
+    dates_by_code: dict[str, list[date]] = {}
     for code, bars in bars_by_code.items():
-        close_index[code] = {bar.trade_date: i for i, bar in enumerate(bars)}
+        index_by_code[code] = {b.trade_date: i for i, b in enumerate(bars)}
+        closes_by_code[code] = [b.close for b in bars]
+        dates_by_code[code] = [b.trade_date for b in bars]
 
-    labeled: list[dict] = []
-    for row in rows:
-        code = row["stock_code"]
-        bars = bars_by_code.get(code)
-        index_map = close_index.get(code)
-        if not bars or not index_map:
-            continue
-        i = index_map.get(row["as_of_date"])
-        if i is None or i + n_days >= len(bars):
-            continue
+    future_return = np.full(n, np.nan, dtype=np.float64)
+    codes = rows.stock_codes()
+    close = rows.column("close")
 
-        entry_close = bars[i].close
-        future_close = bars[i + n_days].close
-        if not entry_close:
+    for i in range(n):
+        code = codes[i]
+        index_map = index_by_code.get(code)
+        if index_map is None:
             continue
-
-        future_return = (future_close - entry_close) / entry_close * 100
+        today = date.fromordinal(int(rows.dates[i]))
+        j = index_map.get(today)
+        if j is None or j + n_days >= len(closes_by_code[code]):
+            continue
+        entry = close[i]
+        if not entry or entry <= 0:
+            continue
+        exit_price = closes_by_code[code][j + n_days]
+        value = (exit_price - entry) / entry * 100
 
         if label_mode == LABEL_EXCESS:
-            market_return = _market_return_between(
-                market_levels, bars[i].trade_date, bars[i + n_days].trade_date
+            market = _market_return_between(
+                market_levels, today, dates_by_code[code][j + n_days]
             )
-            if market_return is None:
-                continue  # 這段期間算不出大盤報酬，就沒有可信的超額報酬可以當答案
-            future_return -= market_return
+            if market is None:
+                continue
+            value -= market
+        future_return[i] = value
 
-        row = dict(row)
-        row["future_return_percent"] = future_return
-        row["label"] = 1 if future_return > threshold_percent else 0
-        labeled.append(row)
+    keep = ~np.isnan(future_return)
+    labeled = rows.mask(keep)
+    kept_returns = future_return[keep]
+    labeled.set_column("future_return_percent", kept_returns)
+    labeled.set_column("label", (kept_returns > threshold_percent).astype(np.float64))
 
     logger.info(
-        "attach_labels(%s): %d 列有完整 label（原始 %d 列）", label_mode, len(labeled), len(rows)
+        "attach_labels(%s): %d 列有完整 label（原始 %d 列）", label_mode, len(labeled), n
     )
     return labeled
 
@@ -113,26 +128,19 @@ def _market_return_between(
     return (end_level - start_level) / start_level * 100
 
 
-def split_by_date(rows: list[dict], start: date, end: date) -> list[dict]:
-    return [r for r in rows if start <= r["as_of_date"] <= end]
+def split_by_date(rows: FeatureFrame, start: date, end: date) -> FeatureFrame:
+    return rows.between(start, end)
 
 
-def to_matrix(rows: list[dict], feature_keys: list[str]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """把特徵列轉成 (X, y_regression, y_classification)。
+def to_matrix(rows: FeatureFrame, feature_keys: list[str]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """把特徵表轉成 (X, y_regression, y_classification)。
 
-    缺值（例如剛上市沒有 MA60、或還沒有估值快照）補 0——在標準化之後，0 就是
-    「該特徵的平均值」，是這裡最中性的填法。
+    缺值留成 NaN，交給 apply_scaler 填成該欄的平均數——標準化之後平均數就是 0，
+    是這裡最中性的填法。
     """
-    x = np.zeros((len(rows), len(feature_keys)), dtype=np.float64)
-    y_reg = np.zeros(len(rows), dtype=np.float64)
-    y_clf = np.zeros(len(rows), dtype=np.int64)
-
-    for i, row in enumerate(rows):
-        for j, key in enumerate(feature_keys):
-            value = row.get(key)
-            x[i, j] = float(value) if value is not None and np.isfinite(float(value)) else np.nan
-        y_reg[i] = row["future_return_percent"]
-        y_clf[i] = row["label"]
+    x = rows.feature_matrix(feature_keys)
+    y_reg = rows.column("future_return_percent").astype(np.float64)
+    y_clf = rows.column("label").astype(np.int64)
     return x, y_reg, y_clf
 
 
@@ -179,66 +187,43 @@ SCALING_MODE_LABELS: dict[str, str] = {
 }
 
 
-def _write_back(rows: list[dict], keys: list[str], values: pd.DataFrame) -> list[dict]:
-    """把算好的欄位寫回 row dict。
-
-    先轉成一個 numpy 陣列再逐格取，而不是對每一格呼叫 `.iat`——三十幾萬列乘上
-    七十幾個特徵是兩千多萬格，`.iat` 的每格開銷在這個量級會變成幾十秒。
-    """
-    matrix = values[keys].to_numpy(dtype="float64", copy=False)
-    nan_mask = np.isnan(matrix)
-    out: list[dict] = []
-    for i, row in enumerate(rows):
-        new_row = dict(row)
-        for j, key in enumerate(keys):
-            new_row[key] = None if nan_mask[i, j] else float(matrix[i, j])
-        out.append(new_row)
-    return out
-
-
-def rank_normalize(rows: list[dict], feature_keys: list[str], skip: set[str] | None = None) -> list[dict]:
+def rank_normalize(
+    rows: FeatureFrame, feature_keys: list[str], skip: set[str] | None = None
+) -> FeatureFrame:
     """把每個特徵換成「當天在全市場的分位數」（0~1）。
 
-    這是業界處理橫斷面選股特徵的標準做法，跟現行的 z-score 差在基準：
-
-    - z-score 用**整個訓練期**的平均與標準差，等於拿 2025 年的數值直接跟
-      2026 年比。市場整體波動變大的時期，所有股票的特徵會一起偏移。
-    - 排名只用**當天**的橫斷面，比的是「這檔今天在全市場排第幾」——而那正是
-      選股要的。極端值自動被壓進 0~1，不用另外 winsorize。
-
-    只用同一天的資料，不看未來，所以在切分之前做是安全的。
+    這是業界處理橫斷面選股特徵的標準做法，跟 z-score 差在基準：z-score 用整個
+    訓練期的平均與標準差，等於拿去年的數值直接跟今年比；排名只用當天的橫斷面，
+    比的是「這檔今天在全市場排第幾」——而那正是選股要的。極端值自動被壓進
+    0~1，不用另外 winsorize。只用同一天的資料，不看未來。
 
     缺值維持缺值：排名是相對位置，硬給一個數字等於憑空捏造一個名次。
 
-    **skip 裡的特徵不做排名。** 大盤特徵（市場漲跌幅、市場寬度…）在同一天對
-    所有股票是同一個值，做橫斷面排名會讓 1362 檔股票全部拿到同一個名次，
-    等於把那個特徵徹底消滅。實測沒排除時，測試 Rank IC 從 +0.053 掉到 +0.023、
-    標準差從 0.020 漲到 0.046——正是因為佔了近兩成重要性的大盤特徵整批失效。
-    這類「橫斷面上是常數」的特徵本來就不該用橫斷面排名處理。
+    **skip 裡的特徵不做排名。** 大盤特徵在同一天對所有股票是同一個值，做橫斷面
+    排名會讓全部股票拿到同一個名次，等於把那個特徵徹底消滅；產業 one-hot 是
+    0/1 指示欄，同理。實測沒排除時，測試 Rank IC 從 +0.053 掉到 +0.023。
+
+    **就地改寫矩陣。** 先前每次轉換都要重建整個 list of dict（一列複製一次），
+    現在只是對幾個欄位做 groupby-rank，記憶體與時間都少一個數量級。
     """
     skip = skip or set()
-    rank_keys = [k for k in feature_keys if k not in skip]
-    if not rank_keys:
-        return rows
-    if not rows:
+    rank_keys = [k for k in feature_keys if k not in skip and k in rows.key_index]
+    if not rank_keys or len(rows) == 0:
         return rows
 
-    frame = pd.DataFrame(
-        {key: [row.get(key) for row in rows] for key in rank_keys},
-        dtype="float64",
-    )
-    frame["__day"] = [row["as_of_date"] for row in rows]
-
-    ranked = frame.groupby("__day", sort=False)[rank_keys].rank(pct=True)
-    out = _write_back(rows, rank_keys, ranked)
+    idx = [rows.key_index[k] for k in rank_keys]
+    block = pd.DataFrame(rows.values[:, idx].astype(np.float64), columns=rank_keys)
+    block["__day"] = rows.dates
+    ranked = block.groupby("__day", sort=False)[rank_keys].rank(pct=True)
+    rows.values[:, idx] = ranked.to_numpy(dtype=np.float64)
 
     logger.info(
         "rank_normalize: %d 列、%d 個特徵換算成當日橫斷面分位數（%d 個跳過）",
-        len(out),
+        len(rows),
         len(rank_keys),
         len(feature_keys) - len(rank_keys),
     )
-    return out
+    return rows
 
 
 # 產業中性化的最小分組人數。低於這個數的產業當天會被併成「零星產業」一組——
@@ -247,58 +232,55 @@ MIN_GROUP_SIZE = 3
 
 
 def industry_neutralize(
-    rows: list[dict],
+    rows: FeatureFrame,
     feature_keys: list[str],
     industry_map: dict[str, str],
     skip: set[str] | None = None,
-) -> list[dict]:
+) -> FeatureFrame:
     """把每個特徵減掉「當天、同產業」的中位數。
 
-    「電子股今天全漲」不該被當成個股 alpha。減掉同業中位數之後，剩下的才是
-    這檔相對同業的強弱——這也是多因子模型處理產業曝險的標準做法。
+    「電子股今天全漲」不該被當成個股 alpha。減掉同業中位數之後，剩下的才是這檔
+    相對同業的強弱——這也是多因子模型處理產業曝險的標準做法。用中位數而不是
+    平均數：產業內常有一兩檔極端值（漲停、剛除權），平均數會被拉走。
 
-    用中位數而不是平均數：產業內常有一兩檔極端值（漲停、剛除權），平均數會被
-    它們拉走，中位數不會。
+    skip 的理由跟 rank_normalize 一樣。沒有產業別的證券（ETF、受益證券）自成
+    「未分類」一組——它們不該跟個股比，但彼此之間比是有意義的。
 
-    skip 裡的特徵不處理，理由跟 rank_normalize 一樣：大盤特徵在同一天對所有
-    股票是同一個值，減掉同業中位數會讓它整欄變成 0。
+    不到 MIN_GROUP_SIZE 檔的產業會併成「零星產業」一組：一檔自己一組時減掉
+    自己的中位數恆等於 0，那個特徵就被徹底消滅了。
 
-    沒有產業別的證券（ETF、受益證券）自成一組。它們不該跟個股比，但彼此之間
-    比是有意義的——把它們丟進「未分類」這一組，而不是留著不處理。
+    跟 rank_normalize 一樣就地改寫矩陣，不重建整張表。
 
-    **人數太少的產業會被併成同一組。** 一檔股票自己一組時，減掉自己的中位數
-    恆等於 0，那個特徵就被徹底消滅了；兩檔的話也只剩下彼此的正負號。所以當天
-    不到 MIN_GROUP_SIZE 檔的產業會一起丟進「零星產業」這一組——併組之後至少
-    還是在跟別人比，比整欄變成 0 有意義。
+    **實測是有害的**（+0.065 → +0.039，連訓練分數都一起掉），所以預設關閉。
     """
-    if not rows:
+    if len(rows) == 0:
         return rows
 
     skip = skip or set()
-    target_keys = [k for k in feature_keys if k not in skip]
+    target_keys = [k for k in feature_keys if k not in skip and k in rows.key_index]
     if not target_keys:
         return rows
 
-    frame = pd.DataFrame(
-        {key: [row.get(key) for row in rows] for key in target_keys},
-        dtype="float64",
-    )
+    idx = [rows.key_index[k] for k in target_keys]
+    codes = rows.stock_codes()
     raw_groups = [
-        f"{row['as_of_date']}|{industry_map.get(row['stock_code'], 'UNKNOWN')}" for row in rows
+        f"{d}|{industry_map.get(c, 'UNKNOWN')}" for d, c in zip(rows.dates.tolist(), codes)
     ]
     sizes = Counter(raw_groups)
-    frame["__group"] = [
-        g if sizes[g] >= MIN_GROUP_SIZE else f"{g.split('|', 1)[0]}|__SPARSE__" for g in raw_groups
+    groups = [
+        g if sizes[g] >= MIN_GROUP_SIZE else f"{g.split('|', 1)[0]}|__SPARSE__"
+        for g in raw_groups
     ]
 
-    medians = frame.groupby("__group", sort=False)[target_keys].transform("median")
-    neutral = frame[target_keys] - medians
-    out = _write_back(rows, target_keys, neutral)
+    block = pd.DataFrame(rows.values[:, idx].astype(np.float64), columns=target_keys)
+    block["__group"] = groups
+    medians = block.groupby("__group", sort=False)[target_keys].transform("median")
+    rows.values[:, idx] = (block[target_keys] - medians).to_numpy(dtype=np.float64)
 
     logger.info(
         "industry_neutralize: %d 列、%d 個特徵減去同日同產業中位數（%d 個跳過）",
-        len(out),
+        len(rows),
         len(target_keys),
         len(feature_keys) - len(target_keys),
     )
-    return out
+    return rows

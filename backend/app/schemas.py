@@ -289,6 +289,9 @@ class WalkForwardConfigIn(BaseModel):
     """滾動視窗的各段月數。整段期間由六個切分日期裡的 train_start 與 test_end 決定，
     這裡只描述「每一折長什麼樣、每次往前滾多久」。"""
 
+    # 折數上限只是「別讓一次訓練無限長」的護欄，不是統計上的限制。
+    # 資料夠長時調高，量測精度會跟著 √折數 改善
+    max_folds: int = Field(default=12, ge=2, le=60)
     train_months: int = Field(default=6, ge=1, le=60)
     validation_months: int = Field(default=2, ge=1, le=24)
     test_months: int = Field(default=2, ge=1, le=24)

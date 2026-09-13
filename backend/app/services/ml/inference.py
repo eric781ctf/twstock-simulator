@@ -120,8 +120,7 @@ def _score_one_model(
 
     bar_index = {code: {bar.trade_date: i for i, bar in enumerate(bars)} for code, bars in bars_by_code.items()}
     bars_until_today = {}
-    for row in rows_today:
-        code = row["stock_code"]
+    for code in rows_today.stock_codes():
         index = bar_index.get(code, {}).get(today)
         if index is not None:
             bars_until_today[code] = bars_by_code[code][: index + 1]
@@ -133,19 +132,21 @@ def _score_one_model(
     for action in exits:
         holding: ModelHolding = action.position.ref
         holding.exit_date = today
-        holding.exit_price = action.exit_price
+        # float() 不是多餘的：價格是從特徵矩陣取出來的 np.float64，
+        # psycopg2 不認得 numpy 純量
+        holding.exit_price = float(action.exit_price)
         holding.status = "closed"
-        holding.return_percent = net_return_percent(holding.entry_price, action.exit_price)
+        holding.return_percent = float(net_return_percent(holding.entry_price, action.exit_price))
         holding.exit_reason = action.reason
 
     for entry in entries:
         db.add(
             ModelHolding(
                 model_id=model.id,
-                stock_code=entry.stock_code,
+                stock_code=str(entry.stock_code),
                 source="live",
                 entry_date=today,
-                entry_price=entry.entry_price,
+                entry_price=float(entry.entry_price),
                 status="open",
             )
         )
@@ -181,17 +182,17 @@ def run_daily_scoring(db: Session, today: date | None = None) -> int:
 
     fetch_start = feature_start - timedelta(days=WARMUP_CALENDAR_DAYS)
     rows, bars_by_code = build_feature_rows(db, fetch_start, today, feature_start)
-    rows_today = [row for row in rows if row["as_of_date"] == today]
+    rows_today = rows.on_date(today)
     if not rows_today:
         logger.warning("run_daily_scoring: %s 沒有可用的特徵列（可能不是交易日或資料未同步），略過", today)
         return 0
 
-    previous_days = sorted({row["as_of_date"] for row in rows if row["as_of_date"] < today})
+    previous_days = rows.before(today).unique_dates()
     if not previous_days:
         logger.warning("run_daily_scoring: 找不到 %s 的前一個交易日，無法產生進場訊號，略過", today)
         return 0
     signal_day = previous_days[-1]
-    signal_rows = [row for row in rows if row["as_of_date"] == signal_day]
+    signal_rows = rows.on_date(signal_day)
     logger.info("run_daily_scoring: %s 成交，進場訊號取自 %s", today, signal_day)
 
     done = 0

@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from app.models import ChipDaily, DailyBar, Market, ShareholdingWeekly, Stock, StockValuationHistory
 from app.services.indicators import compute_kd_series
 from app.services.industry_sync import INDUSTRY_NAMES, load_industry_map
+from app.services.ml.frame import FeatureFrame
 from app.services.ml.price_features import (
     PRICE_FEATURE_KEYS,
     WINDOWS,
@@ -495,7 +496,7 @@ def build_feature_rows(
     # 資料太短的股票連 MA20/KD 都不穩，整檔排除
     bars_by_code = {c: b for c, b in bars_by_code.items() if len(b) >= MIN_BARS_FOR_FEATURES}
     if not bars_by_code:
-        return [], {}
+        return FeatureFrame.empty(list(FEATURE_KEYS)), {}
 
     frame = build_price_frame(bars_by_code)
     features = compute_price_features(frame)
@@ -506,7 +507,7 @@ def build_feature_rows(
     keep = (combined["as_of_date"] >= feature_start) & (position + 1 >= MIN_BARS_FOR_FEATURES)
     combined = combined[keep].reset_index(drop=True)
     if combined.empty:
-        return [], bars_by_code
+        return FeatureFrame.empty(list(FEATURE_KEYS)), bars_by_code
 
     combined = _attach_kd(combined, bars_by_code)
     combined = _attach_valuations(combined, db, fetch_start, fetch_end)
@@ -515,19 +516,54 @@ def build_feature_rows(
     combined = _attach_shareholding(combined, db, fetch_start, fetch_end)
     combined = _attach_industry(combined, db)
 
-    # NaN 要換成 None：下游用 `value is None` 判斷缺值，NaN 會被當成有值
-    combined = combined.astype(object).where(pd.notna(combined), None)
-    rows = combined.to_dict("records")
+    rows = _to_feature_frame(combined)
 
     logger.info(
-        "build_feature_rows: %s~%s 產出 %d 列特徵（涵蓋 %d 檔股票、%d 項特徵）",
+        "build_feature_rows: %s~%s 產出 %d 列特徵（涵蓋 %d 檔股票、%d 項特徵、%.0f MB）",
         feature_start,
         fetch_end,
         len(rows),
         len(bars_by_code),
         len(FEATURE_KEYS),
+        rows.values.nbytes / 2**20,
     )
     return rows, bars_by_code
+
+
+def _to_feature_frame(df: pd.DataFrame) -> FeatureFrame:
+    """把 pandas 表轉成欄式的 FeatureFrame。
+
+    先前這裡是 `astype(object).where(notna, None)` 再 `to_dict("records")`——
+    那個 astype 會把每一格 float 變成一個 Python 物件，168 萬 × 116 格就是
+    六 GB 以上，然後 to_dict 再疊一層 dict 上去。整段換成一次 to_numpy，
+    缺值就留在 float32 的 NaN 裡。
+
+    代號存成「唯一值表 + 索引」：一千多個字串存一次，每列只放一個 int32。
+    日期存成 ordinal，比較與篩選都是純整數運算。
+    """
+    code_names, codes = np.unique(df["stock_code"].to_numpy(), return_inverse=True)
+    dates = np.fromiter((d.toordinal() for d in df["as_of_date"]), dtype=np.int32, count=len(df))
+    # 用 float64 而不是 float32。float32 只有約 7 位有效數字，橫斷面排名時
+    # 原本可分辨的兩個值會變成相同而併位，分位數就跟著變——實測 Rank IC
+    # 每折會差到 5e-3。省下的那一半記憶體不值得拿結果的可重現性去換
+    values = df[FEATURE_KEYS].to_numpy(dtype=np.float64, na_value=np.nan)
+
+    # 價與量不是特徵（跨股票不可比），但下游要拿來算成交價與流動性，
+    # 所以隨身帶著。用 float64——單日成交股數會超過 float32 能精確表示的範圍
+    extras = {
+        "close": df["close"].to_numpy(dtype=np.float64, na_value=np.nan),
+        "volume": df["volume"].to_numpy(dtype=np.float64, na_value=np.nan),
+        "future_return_percent": np.full(len(df), np.nan, dtype=np.float64),
+        "label": np.full(len(df), np.nan, dtype=np.float64),
+    }
+    return FeatureFrame(
+        codes=codes.astype(np.int32),
+        code_names=code_names.astype(object),
+        dates=dates,
+        values=values,
+        feature_keys=list(FEATURE_KEYS),
+        extras=extras,
+    )
 
 
 def _attach_kd(combined: pd.DataFrame, bars_by_code: dict[str, list[DailyBar]]) -> pd.DataFrame:

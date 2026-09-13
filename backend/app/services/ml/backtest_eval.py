@@ -26,22 +26,31 @@ EXIT_BACKTEST_END = "backtest_end"
 
 def save_predictions(db: Session, model: PredictionModel, bundle: ModelBundle, test_rows: list[dict]) -> dict:
     """對測試集全部做一次預測並存檔，順便算出「這些預測準不準」的統計。"""
-    if not test_rows:
+    if len(test_rows) == 0:
         return {"prediction_count": 0}
 
     predicted_returns, probabilities = predict_rows(bundle, test_rows)
-    for row, pred_return, probability in zip(test_rows, predicted_returns, probabilities):
-        db.add(
-            ModelPrediction(
-                model_id=model.id,
-                stock_code=row["stock_code"],
-                as_of_date=row["as_of_date"],
-                predicted_return_percent=float(pred_return),
-                actual_return_percent=float(row["future_return_percent"]),
-                predicted_probability=float(probability),
-                actual_label=bool(row["label"]),
-            )
-        )
+    codes = test_rows.stock_codes()
+    dates = test_rows.dates_as_objects()
+    actual = test_rows.column("future_return_percent")
+    labels = test_rows.column("label")
+    # 一次送一批，不逐列 db.add()——測試集動輒五萬列，逐列 ORM 插入是整個
+    # 訓練流程裡最花時間的一段（實測佔掉約四分之三的牆鐘時間）
+    db.bulk_insert_mappings(
+        ModelPrediction,
+        [
+            {
+                "model_id": model.id,
+                "stock_code": codes[i],
+                "as_of_date": dates[i],
+                "predicted_return_percent": float(predicted_returns[i]),
+                "actual_return_percent": float(actual[i]),
+                "predicted_probability": float(probabilities[i]),
+                "actual_label": bool(labels[i]),
+            }
+            for i in range(len(test_rows))
+        ],
+    )
     db.commit()
     logger.info("save_predictions: 模型 %d 寫入 %d 筆測試集預測", model.id, len(test_rows))
     return {"prediction_count": len(test_rows)}
@@ -60,9 +69,7 @@ def simulate_trading(
     backtest_end——這樣每一筆都有完整報酬率可以畫圖，也清楚看得出來那不是
     真的訊號觸發的出場。
     """
-    rows_by_date: dict[date, list[dict]] = defaultdict(list)
-    for row in test_rows:
-        rows_by_date[row["as_of_date"]].append(row)
+    rows_by_date = {day: test_rows.on_date(day) for day in test_rows.unique_dates()}
     trading_days = sorted(rows_by_date.keys())
     if not trading_days:
         return {"holding_count": 0}
@@ -80,8 +87,7 @@ def simulate_trading(
         # 進場訊號取前一個交易日。第一天沒有前一天，所以只做出場判斷
         signal_rows = rows_by_date[trading_days[i - 1]] if i > 0 else []
         bars_until_today = {}
-        for row in rows_today:
-            code = row["stock_code"]
+        for code in rows_today.stock_codes():
             index = bar_index.get(code, {}).get(today)
             if index is not None:
                 bars_until_today[code] = bars_by_code[code][: index + 1]
@@ -110,7 +116,11 @@ def simulate_trading(
             )
 
     last_day = trading_days[-1]
-    last_prices = {row["stock_code"]: row["close"] for row in rows_by_date[last_day]}
+    last_frame = rows_by_date[last_day]
+    last_prices = {
+        code: float(close)
+        for code, close in zip(last_frame.stock_codes(), last_frame.column("close"))
+    }
     for position in open_positions:
         exit_price = last_prices.get(position.stock_code, position.entry_price)
         closed.append(
@@ -134,11 +144,11 @@ def simulate_trading(
                 stock_code=item["stock_code"],
                 source="backtest",
                 entry_date=item["entry_date"],
-                entry_price=item["entry_price"],
+                entry_price=float(item["entry_price"]),
                 exit_date=item["exit_date"],
-                exit_price=item["exit_price"],
+                exit_price=float(item["exit_price"]),
                 status="closed",
-                return_percent=ret,
+                return_percent=float(ret),
                 exit_reason=item["reason"],
             )
         )

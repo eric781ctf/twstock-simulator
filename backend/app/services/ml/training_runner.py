@@ -35,6 +35,7 @@ from app.services.ml.dataset import (
     to_matrix,
 )
 from app.services.industry_sync import load_industry_map
+from app.services.ml.frame import FeatureFrame
 from app.services.ml.features import CROSS_SECTION_SKIP_KEYS, WARMUP_BARS, build_feature_rows
 from app.services.ml.selection import ModelBundle
 from app.services.ml.train import SEQUENCE_MODEL_TYPES, train_dual_task
@@ -43,6 +44,7 @@ from app.services.ml.walk_forward import (
     DEFAULT_TEST_MONTHS,
     DEFAULT_TRAIN_MONTHS,
     DEFAULT_VALIDATION_MONTHS,
+    MAX_FOLDS,
     Fold,
     generate_folds,
     summarize_folds,
@@ -102,11 +104,12 @@ def _sequence_length_for(model: PredictionModel) -> int | None:
     return int(config.get("sequence_length") or DEFAULT_SEQUENCE_LENGTH)
 
 
-def _labels(rows: list[dict]) -> tuple[np.ndarray, np.ndarray]:
+def _labels(rows: FeatureFrame) -> tuple[np.ndarray, np.ndarray]:
     """序列模型的 X 由 stack_sequences 組，但 label 還是逐列來的，另外抽出來。"""
-    y_reg = np.array([row["future_return_percent"] for row in rows], dtype=np.float64)
-    y_clf = np.array([row["label"] for row in rows], dtype=np.int64)
-    return y_reg, y_clf
+    return (
+        rows.column("future_return_percent").astype(np.float64),
+        rows.column("label").astype(np.int64),
+    )
 
 
 def _progress_writer(db: Session, model_id: int):
@@ -188,7 +191,7 @@ def _prepare_rows(db: Session, model: PredictionModel, feature_keys: list[str], 
     return labeled, bars_by_code
 
 
-def _split_fold(labeled: list[dict], fold: Fold, sequence_length: int | None):
+def _split_fold(labeled: FeatureFrame, fold: Fold, sequence_length: int | None):
     """依一折的六個日期界線切出三段，並回報哪一段是空的。"""
     train_rows = split_by_date(labeled, fold.train_start, fold.train_end)
     validation_rows = split_by_date(labeled, fold.validation_start, fold.validation_end)
@@ -209,7 +212,7 @@ def _split_fold(labeled: list[dict], fold: Fold, sequence_length: int | None):
     return train_rows, validation_rows, test_rows, empty
 
 
-def _build_matrices(rows: list[dict], feature_keys: list[str], sequence_length: int | None):
+def _build_matrices(rows: FeatureFrame, feature_keys: list[str], sequence_length: int | None):
     """回傳 (X_raw, y_迴歸, y_分類)。序列模型的 X 多一個時間維度。"""
     if sequence_length:
         from app.services.ml.sequences import stack_sequences
@@ -294,6 +297,7 @@ def _folds_for(model: PredictionModel) -> list[Fold]:
         validation_months=int(config.get("validation_months", DEFAULT_VALIDATION_MONTHS)),
         test_months=int(config.get("test_months", DEFAULT_TEST_MONTHS)),
         step_months=int(config.get("step_months", DEFAULT_STEP_MONTHS)),
+        max_folds=int(config.get("max_folds", MAX_FOLDS)),
     )
     if not folds:
         raise ValueError(
