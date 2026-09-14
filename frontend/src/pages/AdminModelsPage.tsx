@@ -5,6 +5,7 @@ import { ConditionEditor } from "../components/ConditionEditor";
 import { useAuth } from "../auth/AuthContext";
 import type {
   Activation,
+  ExecutionMode,
   FeatureScaling,
   LabelMode,
   ValidationMode,
@@ -83,6 +84,7 @@ export default function AdminModelsPage() {
   const [nDays, setNDays] = useState("5");
   const [threshold, setThreshold] = useState("3");
   const [labelMode, setLabelMode] = useState<LabelMode>("excess");
+  const [executionMode, setExecutionMode] = useState<ExecutionMode>("close");
   const [validationMode, setValidationMode] = useState<ValidationMode>("walk_forward");
   const [featureScaling, setFeatureScaling] = useState<FeatureScaling>("cross_sectional_rank");
   const [industryNeutral, setIndustryNeutral] = useState(false);
@@ -172,8 +174,18 @@ export default function AdminModelsPage() {
   function applyPreset(key: string) {
     setPresetKey(key);
     const preset = defaults?.feature_presets.find((p) => p.key === key);
-    if (preset) setFeatures(preset.features);
+    if (!preset) return;
+    setFeatures(preset.features);
+    // 有些特徵集只在某一種成交模式下合法（隔夜期貨只能配盤前決策）。後端會擋，
+    // 但那要等訓練跑起來才失敗——在這裡就切過去，順手也把限制講出來
+    if (preset.requires_execution_mode) setExecutionMode(preset.requires_execution_mode);
   }
+
+  /** 勾到任何一個隔夜特徵，成交模式就只剩一個選項，欄位直接鎖住。
+   *  清單由後端給，前端不自己猜命名規則——加新特徵時只要改一邊。 */
+  const needsPreOpen = (defaults?.next_open_only_features ?? []).some((f) =>
+    features.includes(f),
+  );
 
   function optionalNumber(value: string): number | null {
     const n = Number(value);
@@ -205,6 +217,7 @@ export default function AdminModelsPage() {
       n_days: Number(nDays),
       threshold_percent: Number(threshold),
       label_mode: labelMode,
+      execution_mode: needsPreOpen ? "next_open" : executionMode,
       validation_mode: validationMode,
       feature_scaling: featureScaling,
       industry_neutral: industryNeutral,
@@ -381,6 +394,22 @@ export default function AdminModelsPage() {
                 <option value="excess">超額報酬（減掉大盤）</option>
                 <option value="absolute">絕對報酬</option>
               </select>
+            </label>
+            <label>
+              決策與成交時點
+              <select
+                value={needsPreOpen ? "next_open" : executionMode}
+                disabled={needsPreOpen}
+                onChange={(e) => setExecutionMode(e.target.value as ExecutionMode)}
+              >
+                <option value="close">收盤決策、收盤成交</option>
+                <option value="next_open">盤前決策、開盤成交</option>
+              </select>
+              <span className="order-hint">
+                {needsPreOpen
+                  ? "選到的特徵含隔夜期貨，只能盤前決策、開盤成交"
+                  : "換模式等於換一種 label（收盤→收盤 vs 開盤→開盤），兩者的 Rank IC 不能互相比較"}
+              </span>
             </label>
             <label>
               報酬率門檻（%）

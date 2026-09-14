@@ -12,7 +12,7 @@ from datetime import date
 import numpy as np
 
 from app.models import DailyBar, PredictionModel
-from app.services.modeling.labels import to_matrix
+from app.services.modeling.labels import EXECUTION_NEXT_OPEN, to_matrix
 from app.services.features.transforms import apply_scaler
 from app.services.trading.exit_rules import decide_exit, limit_state
 from app.services.modeling.train import compute_scores
@@ -121,13 +121,28 @@ def run_daily_cycle(
     收盤價算出來的，所以訊號成形的當下今天的盤已經收了——拿今天的訊號配
     今天的收盤價，等於用一個當下取不到的價格成交。實測這個假設本身就佔了
     八成以上的回測績效，是整條管線裡最大的一個 look-ahead。
+
+    model.execution_mode 決定「今天」是在哪個時點動作：
+
+    - close：收盤成交。價格取今天收盤，規則條件可以看到今天整根 K 棒。
+    - next_open：開盤成交。決策在 09:00 之前做完，所以價格取今天開盤，而且
+      規則條件只能看到**昨天為止**的 K 棒——今天的最高最低收盤那時都還沒發生。
     """
+    pre_open = model.execution_mode == EXECUTION_NEXT_OPEN
+    price_column = "open" if pre_open else "close"
+
     # 一定要轉成 Python float：矩陣取出來的是 np.float64，psycopg2 不認得它，
     # 寫進 ModelHolding 時會變成 SQL 裡的 "np.float64(...)" 字面值而爆掉
     price_today = {
-        code: float(close)
-        for code, close in zip(rows_today.stock_codes(), rows_today.column("close"))
+        code: float(price)
+        for code, price in zip(rows_today.stock_codes(), rows_today.column(price_column))
+        if price == price  # NaN 濾掉：沒有開盤價就沒辦法成交
     }
+
+    def rule_bars(code: str) -> list[DailyBar]:
+        """規則條件能看到的 K 棒。盤前決策時今天那根還沒收，要切掉。"""
+        bars = bars_until_today.get(code, [])
+        return bars[:-1] if pre_open else bars
 
     exits: list[ExitAction] = []
     still_held: set[str] = set()
@@ -143,10 +158,11 @@ def run_daily_cycle(
             entry_price=position.entry_price,
             today=today,
             today_price=price,
-            bars_until_today=bars_until_today.get(position.stock_code, []),
+            bars_until_today=rule_bars(position.stock_code),
         )
-        if decision.should_exit and limit_state(bars_until_today.get(position.stock_code, [])) == "down":
-            # 跌停當天沒有買方，賣不掉，只能續抱到隔天再判斷一次
+        down = limit_state(bars_until_today.get(position.stock_code, []), price_column) == "down"
+        if decision.should_exit and down:
+            # 跌停沒有買方，賣不掉，只能續抱到隔天再判斷一次
             still_held.add(position.stock_code)
         elif decision.should_exit:
             exits.append(ExitAction(position=position, exit_price=price, reason=decision.reason or "rule_condition"))
@@ -159,9 +175,9 @@ def run_daily_cycle(
 
     # 今天買得到的價格。訊號來自昨天，但成交價與漲跌停都要看今天
     tradable = {
-        code: float(close)
-        for code, close in zip(rows_today.stock_codes(), rows_today.column("close"))
-        if limit_state(bars_until_today.get(code, [])) != "up"
+        code: price
+        for code, price in price_today.items()
+        if limit_state(bars_until_today.get(code, []), price_column) != "up"
     }
     signal_codes = signal_rows.stock_codes()
     keep = np.array(
@@ -194,7 +210,7 @@ def run_daily_cycle(
     entries = [
         EntryAction(
             stock_code=candidate_codes[i],
-            # 訊號是昨天的，成交價是今天的
+            # 訊號是昨天的，成交價是今天的（收盤或開盤，看 execution_mode）
             entry_price=tradable[candidate_codes[i]],
             score=float(scores[i]),
             predicted_return_percent=float(predicted_returns[i]),

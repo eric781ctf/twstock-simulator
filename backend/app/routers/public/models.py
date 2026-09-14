@@ -30,7 +30,7 @@ from app.schemas import (
     ScoringRunOut,
     WalkForwardSummaryOut,
 )
-from app.services.modeling.labels import LABEL_MODE_LABELS
+from app.services.modeling.labels import EXECUTION_MODE_LABELS, LABEL_MODE_LABELS
 from app.services.features.transforms import SCALING_MODE_LABELS
 from app.services.trading.exit_rules import net_return_percent
 from app.services.features.builder import FEATURE_KEYS, FEATURE_LABELS
@@ -96,6 +96,8 @@ def _summary(model: PredictionModel, stats: dict) -> ModelSummaryOut:
         threshold_percent=model.threshold_percent,
         label_mode=model.label_mode,
         label_mode_label=LABEL_MODE_LABELS.get(model.label_mode, model.label_mode),
+        execution_mode=model.execution_mode,
+        execution_mode_label=EXECUTION_MODE_LABELS.get(model.execution_mode, model.execution_mode),
         validation_mode=model.validation_mode,
         feature_scaling=model.feature_scaling,
         feature_scaling_label=SCALING_MODE_LABELS.get(model.feature_scaling, model.feature_scaling),

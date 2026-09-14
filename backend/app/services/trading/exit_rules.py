@@ -28,16 +28,25 @@ EXIT_RULE_CONDITION = "rule_condition"
 LIMIT_MOVE_THRESHOLD = 0.095
 
 
-def limit_state(bars: list[DailyBar]) -> str | None:
-    """今天是收在漲停、跌停、還是都不是。
+def limit_state(bars: list[DailyBar], price: str = "close") -> str | None:
+    """今天是漲停、跌停、還是都不是。
 
     這件事必須進回測：**漲停沒有賣方，買不到；跌停沒有買方，賣不掉。**
     不擋的話，模型會大量選到「當天已經攻上漲停」的股票，回測用一個實際上
     拿不到的價格成交——實測有 28% 的進場落在漲停日。
+
+    price 決定拿今天的哪個價格跟昨天收盤比：
+
+    - close：收盤成交模式用。整天走完之後是不是收在漲跌停。
+    - open：開盤成交模式用。**開盤跳空鎖死**才是那個模式下真正買不到／賣不掉
+      的情形；用收盤價判斷反而是看未來——09:00 成交的當下還不知道今天會收在哪。
     """
     if len(bars) < 2 or bars[-2].close <= 0:
         return None
-    change = bars[-1].close / bars[-2].close - 1
+    today_price = bars[-1].open if price == "open" else bars[-1].close
+    if not today_price:
+        return None
+    change = today_price / bars[-2].close - 1
     if change >= LIMIT_MOVE_THRESHOLD:
         return "up"
     if change <= -LIMIT_MOVE_THRESHOLD:

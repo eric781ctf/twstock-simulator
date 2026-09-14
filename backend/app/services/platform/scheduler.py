@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -7,12 +8,14 @@ from app.database import SessionLocal
 from app.services.platform.feature_flags import (
     SCHEDULER_DAILY_BAR_BACKFILL,
     SCHEDULER_DAILY_STOCK_SYNC,
+    SCHEDULER_FUTURES_SYNC,
     SCHEDULER_MODEL_SCORING,
     is_enabled,
 )
 from app.services.trading.inference import run_daily_scoring
 from app.services.platform.clock import TAIPEI_TZ
-from app.services.ingest.stock_sync import backfill_twse_to_target, sync_stocks, sync_valuations
+from app.services.ingest import taifex_sync
+from app.services.ingest.stock_sync import backfill_twse_to_target, sync_stocks
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +29,6 @@ async def _daily_stock_sync_job() -> None:
     try:
         if not is_enabled(db, SCHEDULER_DAILY_STOCK_SYNC):
             return
-        prune_old_price_points(db)
         await sync_stocks(db)
     except Exception:
         logger.exception("每日股票清單同步發生錯誤")
@@ -45,6 +47,25 @@ async def _daily_bar_backfill_job() -> None:
     finally:
         db.close()
 
+
+
+async def _futures_sync_job() -> None:
+    """補上台指期／電子期最近幾天的行情。
+
+    夜盤 05:00 收盤，期交所稍後就會放出當天那一節，所以 06:30 跑。抓最近
+    一週而不是只抓昨天：期交所偶爾會延後放檔，多抓幾天可以把前一次漏掉的
+    自動補回來，而 _store 本來就會跳過已經有的日期，重抓不浪費請求。
+    """
+    db = SessionLocal()
+    try:
+        if not is_enabled(db, SCHEDULER_FUTURES_SYNC):
+            return
+        today = datetime.now(TAIPEI_TZ).date()
+        await taifex_sync.backfill(db, today - timedelta(days=7), today)
+    except Exception:
+        logger.exception("每日台指期同步發生錯誤")
+    finally:
+        db.close()
 
 
 async def _model_scoring_job() -> None:
@@ -70,6 +91,8 @@ def start_scheduler() -> None:
     if not scheduler.running:
         scheduler.add_job(_daily_stock_sync_job, "cron", hour=8, minute=30, id="daily_stock_sync")
         scheduler.add_job(_daily_bar_backfill_job, "cron", hour=7, minute=0, id="daily_bar_backfill")
+        # 夜盤 05:00 收，期交所放檔後再抓。要早於任何會用到隔夜特徵的工作
+        scheduler.add_job(_futures_sync_job, "cron", hour=6, minute=30, id="futures_sync")
         # 收盤（13:30）後，等 TWSE 官方把當天全市場收盤資料放上來再跑
         scheduler.add_job(_model_scoring_job, "cron", hour=15, minute=0, id="model_scoring")
         scheduler.start()

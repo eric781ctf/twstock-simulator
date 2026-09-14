@@ -27,6 +27,18 @@ LABEL_MODE_LABELS: dict[str, str] = {
     LABEL_EXCESS: "超額報酬（個股減掉大盤）",
 }
 
+# 成交時點。跟 label_mode 是兩件獨立的事：label_mode 決定要不要減掉大盤，
+# execution_mode 決定量的是哪一段價格。
+EXECUTION_CLOSE = "close"
+EXECUTION_NEXT_OPEN = "next_open"
+
+EXECUTION_MODES = [EXECUTION_CLOSE, EXECUTION_NEXT_OPEN]
+
+EXECUTION_MODE_LABELS: dict[str, str] = {
+    EXECUTION_CLOSE: "收盤決策、收盤成交（收盤 D → 收盤 D+n）",
+    EXECUTION_NEXT_OPEN: "盤前決策、開盤成交（開盤 D+1 → 開盤 D+1+n）",
+}
+
 
 
 def attach_labels(
@@ -36,6 +48,7 @@ def attach_labels(
     threshold_percent: float,
     label_mode: str = LABEL_ABSOLUTE,
     market_levels: dict[date, float] | None = None,
+    execution_mode: str = EXECUTION_CLOSE,
 ) -> FeatureFrame:
     """替每一列補上未來 n 個交易日的報酬率與是否達標。
 
@@ -54,6 +67,16 @@ def attach_labels(
     大盤報酬取的是「同樣的起訖日期」，不是「同樣的交易日數」：停牌過的股票
     第 n 根 K 棒可能落在比較晚的日期，這時候要比的是那段實際經過的期間。
 
+    execution_mode 決定量的是哪一段價格：
+
+    - close：收盤(D) → 收盤(D+n)。搭配收盤決策、收盤成交。
+    - next_open：開盤(D+1) → 開盤(D+1+n)。搭配盤前決策、開盤成交——決策在
+      09:00 之前做完，成交在開盤，所以 label 的起點是隔天的開盤價而不是
+      今天的收盤價。整段視窗往後挪一天，持有長度一樣是 n 個交易日。
+
+    這兩種模式量的是不同的區間，**算出來的 Rank IC 不能互相比較**，換模式
+    等於要重建基準。
+
     沒有 label 的列（資料尾端不足 n 根）直接排除，回傳新的 FeatureFrame。
     """
     n = len(rows)
@@ -63,15 +86,22 @@ def attach_labels(
     # 每檔股票的「日期 → 第幾根K棒」索引，查未來第 n 根用
     index_by_code: dict[str, dict[date, int]] = {}
     closes_by_code: dict[str, list[float]] = {}
+    opens_by_code: dict[str, list[float]] = {}
     dates_by_code: dict[str, list[date]] = {}
     for code, bars in bars_by_code.items():
         index_by_code[code] = {b.trade_date: i for i, b in enumerate(bars)}
         closes_by_code[code] = [b.close for b in bars]
+        opens_by_code[code] = [b.open for b in bars]
         dates_by_code[code] = [b.trade_date for b in bars]
+
+    # 兩種模式差在「從哪一根 K 棒的哪個價格進、哪一根的哪個價格出」。
+    # close：  進 = 收盤(j)、出 = 收盤(j+n)
+    # next_open：進 = 開盤(j+1)、出 = 開盤(j+1+n)
+    entry_offset = 1 if execution_mode == EXECUTION_NEXT_OPEN else 0
+    prices = opens_by_code if execution_mode == EXECUTION_NEXT_OPEN else closes_by_code
 
     future_return = np.full(n, np.nan, dtype=np.float64)
     codes = rows.stock_codes()
-    close = rows.column("close")
 
     for i in range(n):
         code = codes[i]
@@ -80,17 +110,25 @@ def attach_labels(
             continue
         today = date.fromordinal(int(rows.dates[i]))
         j = index_map.get(today)
-        if j is None or j + n_days >= len(closes_by_code[code]):
+        if j is None:
             continue
-        entry = close[i]
+        start_index = j + entry_offset
+        exit_index = start_index + n_days
+        if exit_index >= len(prices[code]):
+            continue
+        entry = prices[code][start_index]
+        exit_price = prices[code][exit_index]
         if not entry or entry <= 0:
             continue
-        exit_price = closes_by_code[code][j + n_days]
         value = (exit_price - entry) / entry * 100
 
         if label_mode == LABEL_EXCESS:
+            # 大盤要比的是「這筆持有實際經過的那一段」，所以起點也跟著
+            # entry_offset 移動——不然 next_open 模式會拿多一天的大盤報酬去減
             market = _market_return_between(
-                market_levels, today, dates_by_code[code][j + n_days]
+                market_levels,
+                dates_by_code[code][start_index],
+                dates_by_code[code][exit_index],
             )
             if market is None:
                 continue
@@ -104,7 +142,11 @@ def attach_labels(
     labeled.set_column("label", (kept_returns > threshold_percent).astype(np.float64))
 
     logger.info(
-        "attach_labels(%s): %d 列有完整 label（原始 %d 列）", label_mode, len(labeled), n
+        "attach_labels(%s/%s): %d 列有完整 label（原始 %d 列）",
+        label_mode,
+        execution_mode,
+        len(labeled),
+        n,
     )
     return labeled
 

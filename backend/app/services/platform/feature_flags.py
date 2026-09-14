@@ -9,20 +9,21 @@ from app.models import FeatureFlag
 SCHEDULER_DAILY_STOCK_SYNC = "scheduler_daily_stock_sync"
 SCHEDULER_DAILY_BAR_BACKFILL = "scheduler_daily_bar_backfill"
 SCHEDULER_MODEL_SCORING = "scheduler_model_scoring"
+SCHEDULER_FUTURES_SYNC = "scheduler_futures_sync"
 
 FLAG_LABELS: dict[str, str] = {
     SCHEDULER_DAILY_STOCK_SYNC: "每日股票同步排程",
     SCHEDULER_DAILY_BAR_BACKFILL: "每日日K回補排程",
     SCHEDULER_MODEL_SCORING: "每日模型選股排程",
+    SCHEDULER_FUTURES_SYNC: "每日台指期同步排程",
 }
 
 FLAG_KEYS = list(FLAG_LABELS.keys())
 
-# 只有這三個排程跟預測模型系統有關，管理後台只顯示這些——其餘的（撮合輪詢、
-# 策略輪詢、績效快照）都是舊模擬器留下來的，對這個系統沒有意義。
 MODEL_SYSTEM_FLAGS = [
     SCHEDULER_DAILY_STOCK_SYNC,
     SCHEDULER_DAILY_BAR_BACKFILL,
+    SCHEDULER_FUTURES_SYNC,
     SCHEDULER_MODEL_SCORING,
 ]
 
@@ -31,6 +32,10 @@ FLAG_DESCRIPTIONS: dict[str, str] = {
     SCHEDULER_DAILY_STOCK_SYNC: "每天 08:30 更新股票清單並寫入最新一筆日K。關掉的話模型會拿不到當天的收盤資料。",
     SCHEDULER_DAILY_BAR_BACKFILL: "每天 07:00 往前補歷史日K，補到設定的目標月數為止。關掉不影響既有資料，只是不再往前補。",
     SCHEDULER_MODEL_SCORING: "每個交易日 15:00 讓所有啟用中的模型選股與判斷出場。關掉的話模型不會再開新部位，手上的部位也不會出場。",
+    SCHEDULER_FUTURES_SYNC: (
+        "每天 06:30 補上台指期／電子期的日盤與夜盤。夜盤 05:00 收，所以 06:30 抓得到當天那一節。"
+        "關掉的話隔夜特徵會停在最後一次同步的日期，用到它的模型選股會拿到缺值。"
+    ),
 }
 
 

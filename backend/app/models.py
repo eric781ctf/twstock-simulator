@@ -131,6 +131,16 @@ class PredictionModel(Base):
     # 預測的是絕對報酬還是超額報酬（減掉大盤）。舊模型沒有這個欄位，
     # 取不到就是 absolute——它們當初訓練時本來就是那樣算的
     label_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="absolute")
+    # 什麼時候成交，以及 label 量的是哪一段價格。
+    #
+    # close      收盤決策、收盤成交：label = 收盤(D) → 收盤(D+n)
+    # next_open  盤前決策、開盤成交：label = 開盤(D+1) → 開盤(D+1+n)
+    #
+    # 差別不只是「換一個價格欄位」。next_open 把決策時點移到 09:00 之前，
+    # 於是前一晚的美股與台指期夜盤變成可用的資訊——那是 close 模式拿不到的
+    # （在 close 模式下，夜盤發生在成交之後）。代價是兩種模式的 label 量的是
+    # 不同的區間，績效數字**不能互相比較**，換模式等於要重建基準。
+    execution_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="close")
 
     # 選股分數一律用橫斷面標準化加權（見 services/ml/train.py 的 SCORE_FORMULA_INFO）
     score_formula: Mapped[str] = mapped_column(String(20), nullable=False, default="zscore_weighted")
