@@ -33,9 +33,13 @@ from app.services.modeling.labels import (
 )
 from app.services.features.transforms import SCALING_RANK, apply_scaler, fit_scaler, fit_scaler_sequences, industry_neutralize, rank_normalize
 from app.services.ingest.industry_sync import load_industry_map
-from app.services.features.futures import OVERNIGHT_FEATURE_KEYS
 from app.services.features.frame import FeatureFrame
-from app.services.features.builder import CROSS_SECTION_SKIP_KEYS, WARMUP_BARS, build_feature_rows
+from app.services.features.builder import (
+    CROSS_SECTION_SKIP_KEYS,
+    NEXT_OPEN_ONLY_KEYS,
+    WARMUP_BARS,
+    build_feature_rows,
+)
 from app.services.trading.selection import ModelBundle
 from app.services.modeling.train import SEQUENCE_MODEL_TYPES, _rank_ic, train_dual_task
 from app.services.modeling import cpcv as cpcv_mod
@@ -550,9 +554,10 @@ def _cpcv_warnings(summary: dict) -> list[str]:
 def validate_execution_mode(execution_mode: str, feature_keys: list[str]) -> None:
     """成交模式與特徵集必須相容，不相容就直接讓訓練失敗。
 
-    隔夜特徵裝的是基準日收盤「之後」那一晚的事。在 close 模式（收盤決策、
-    收盤成交）下，成交發生在那一晚之前，所以那些欄位是不折不扣的 look-ahead：
-    模型會學到一個上線時根本取不到的訊號，回測漂亮、實際無效。
+    隔夜特徵（台指期夜盤、美股、ADR）裝的是基準日收盤「之後」那一晚的事。
+    在 close 模式（收盤決策、收盤成交）下，成交發生在那一晚之前，所以那些
+    欄位是不折不扣的 look-ahead：模型會學到一個上線時根本取不到的訊號，
+    回測漂亮、實際無效。
 
     這裡刻意用例外而不是「自動把那幾欄拿掉」。靜默降級的話，使用者會以為
     自己測的是隔夜特徵、實際上測的是別的東西，而那個誤會不會有任何跡象。
@@ -561,7 +566,7 @@ def validate_execution_mode(execution_mode: str, feature_keys: list[str]) -> Non
         raise ValueError(f"不認得的成交模式：{execution_mode}")
     if execution_mode == EXECUTION_NEXT_OPEN:
         return
-    leaking = [k for k in feature_keys if k in set(OVERNIGHT_FEATURE_KEYS)]
+    leaking = [k for k in feature_keys if k in set(NEXT_OPEN_ONLY_KEYS)]
     if leaking:
         raise ValueError(
             "隔夜特徵只能搭配「盤前決策、開盤成交」（next_open）。"

@@ -8,6 +8,7 @@ import type {
   ChipStatus,
   DailyBarStats,
   IndustryStatus,
+  OverseasStatus,
   SchedulerFlag,
   ShareholdingStatus,
 } from "../types";
@@ -32,6 +33,7 @@ export default function AdminPage() {
   const [chipTargetInput, setChipTargetInput] = useState("");
   const [shareholding, setShareholding] = useState<ShareholdingStatus | null>(null);
   const [industry, setIndustry] = useState<IndustryStatus | null>(null);
+  const [overseas, setOverseas] = useState<OverseasStatus | null>(null);
   const [dataBusy, setDataBusy] = useState(false);
   const [backfillBusy, setBackfillBusy] = useState(false);
   const [schedulers, setSchedulers] = useState<SchedulerFlag[]>([]);
@@ -58,6 +60,10 @@ export default function AdminPage() {
     setIndustry(await api.getIndustryStatus());
   }, []);
 
+  const refreshOverseas = useCallback(async () => {
+    setOverseas(await api.getOverseasStatus());
+  }, []);
+
   const refreshSchedulers = useCallback(async () => {
     setSchedulers(await api.getModelSchedulers());
   }, []);
@@ -73,6 +79,7 @@ export default function AdminPage() {
     refreshChipStatus();
     refreshShareholding();
     refreshIndustry();
+    refreshOverseas();
     refreshSchedulers();
   }, [
     isAdmin,
@@ -81,6 +88,7 @@ export default function AdminPage() {
     refreshChipStatus,
     refreshShareholding,
     refreshIndustry,
+    refreshOverseas,
     refreshSchedulers,
   ]);
 
@@ -352,6 +360,60 @@ ${flag.description}`)) return;
             onClick={() => runDataAction(api.syncIndustries, setIndustry, "同步失敗")}
           >
             {dataBusy ? "處理中..." : "同步產業別"}
+          </button>
+        </div>
+      </div>
+
+      <div className="panel admin-action-card">
+        <h2>美股與 ADR</h2>
+        <p className="order-hint">
+          台股 13:30 收盤之後美股才開盤，那一節的漲跌在隔天 09:00 之前是已知的。指數提供族群層級的
+          連動（費半對半導體、那斯達克對電子、道瓊對傳產），ADR 提供個股層級——台積電 ADR 昨晚跌 3%，
+          那是對 2330 這一檔的直接訊息。目前共
+          <span className="admin-current-value">{overseas ? overseas.total_rows.toLocaleString() : "-"}</span>
+          列
+        </p>
+        <p className="order-hint">
+          這批欄位<strong>只能搭配「盤前決策、開盤成交」</strong>的模型。收盤成交的模型在那一晚之前
+          就成交了，用這些欄位等於看未來，訓練時會被直接擋下來。
+        </p>
+        {overseas && (
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>代號</th>
+                  <th>類型</th>
+                  <th>對應台股</th>
+                  <th>筆數</th>
+                  <th>涵蓋範圍</th>
+                </tr>
+              </thead>
+              <tbody>
+                {overseas.symbols.map((row) => (
+                  <tr key={row.symbol}>
+                    <td>{row.symbol}</td>
+                    <td>{row.kind === "adr" ? "ADR" : "指數"}</td>
+                    <td>{row.stock_code ?? "-"}</td>
+                    <td>{row.rows.toLocaleString()}</td>
+                    <td>{row.start ? `${row.start} ~ ${row.end}` : "尚無資料"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {overseas && overseas.missing.length > 0 && (
+          <p className="order-hint warn">完全沒有資料的代號：{overseas.missing.join("、")}</p>
+        )}
+        <div className="admin-action-row">
+          <button
+            className="submit"
+            type="button"
+            disabled={dataBusy}
+            onClick={() => runDataAction(api.syncOverseas, setOverseas, "同步失敗")}
+          >
+            {dataBusy ? "處理中..." : "同步美股／ADR"}
           </button>
         </div>
       </div>

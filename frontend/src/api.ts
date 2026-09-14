@@ -3,6 +3,7 @@ import type {
   BackfillStatus,
   ChipStatus,
   IndustryStatus,
+  OverseasStatus,
   ShareholdingStatus,
   DailyBarStats,
   FeatureFlag,
@@ -81,6 +82,9 @@ export const api = {
     request<ShareholdingStatus>("/admin/models/shareholding-import", { method: "POST" }),
   fetchShareholding: () =>
     request<ShareholdingStatus>("/admin/models/shareholding-fetch", { method: "POST" }),
+  getOverseasStatus: () => request<OverseasStatus>("/admin/models/overseas-status"),
+  syncOverseas: () => request<OverseasStatus>("/admin/models/overseas-sync", { method: "POST" }),
+
   getIndustryStatus: () => request<IndustryStatus>("/admin/models/industry-status"),
   syncIndustries: () => request<IndustryStatus>("/admin/models/industry-sync", { method: "POST" }),
   getModelSchedulers: () => request<SchedulerFlag[]>("/admin/models/schedulers"),

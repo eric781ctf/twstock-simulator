@@ -9,12 +9,13 @@ from app.services.platform.feature_flags import (
     SCHEDULER_DAILY_BAR_BACKFILL,
     SCHEDULER_DAILY_STOCK_SYNC,
     SCHEDULER_FUTURES_SYNC,
+    SCHEDULER_OVERSEAS_SYNC,
     SCHEDULER_MODEL_SCORING,
     is_enabled,
 )
 from app.services.trading.inference import run_daily_scoring
 from app.services.platform.clock import TAIPEI_TZ
-from app.services.ingest import taifex_sync
+from app.services.ingest import overseas_sync, taifex_sync
 from app.services.ingest.stock_sync import backfill_twse_to_target, sync_stocks
 
 logger = logging.getLogger(__name__)
@@ -68,6 +69,24 @@ async def _futures_sync_job() -> None:
         db.close()
 
 
+async def _overseas_sync_job() -> None:
+    """同步美股指數與台廠 ADR。
+
+    美股 16:00 ET 收盤＝台北時間隔天 04:00（夏令）或 05:00（冬令），所以 06:45
+    兩種都涵蓋得到。抓最近十天而不是只抓昨天：Yahoo 會回修正後的歷史值，
+    多抓幾天順便把前幾天的修正一起更新進來。
+    """
+    db = SessionLocal()
+    try:
+        if not is_enabled(db, SCHEDULER_OVERSEAS_SYNC):
+            return
+        await overseas_sync.sync_recent(db)
+    except Exception:
+        logger.exception("每日美股同步發生錯誤")
+    finally:
+        db.close()
+
+
 async def _model_scoring_job() -> None:
     """交易日收盤後的模型選股。先同步一次股票清單，把「今天」的收盤價寫進
     daily_bars（TWSE 的 STOCK_DAY_ALL 大約下午 2 點半後就會更新當天資料），
@@ -93,6 +112,8 @@ def start_scheduler() -> None:
         scheduler.add_job(_daily_bar_backfill_job, "cron", hour=7, minute=0, id="daily_bar_backfill")
         # 夜盤 05:00 收，期交所放檔後再抓。要早於任何會用到隔夜特徵的工作
         scheduler.add_job(_futures_sync_job, "cron", hour=6, minute=30, id="futures_sync")
+        # 美股最晚 05:00（冬令）收完，排在期貨之後、日K回補之前
+        scheduler.add_job(_overseas_sync_job, "cron", hour=6, minute=45, id="overseas_sync")
         # 收盤（13:30）後，等 TWSE 官方把當天全市場收盤資料放上來再跑
         scheduler.add_job(_model_scoring_job, "cron", hour=15, minute=0, id="model_scoring")
         scheduler.start()

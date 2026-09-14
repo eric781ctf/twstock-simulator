@@ -78,6 +78,27 @@ class ChipStatusOut(BaseModel):
     progress: BackfillProgressOut
 
 
+class OverseasSymbolOut(BaseModel):
+    """單一海外標的的涵蓋情形。"""
+
+    symbol: str
+    # index=指數（族群連動的來源）、adr=台廠 ADR（個股層級）
+    kind: str
+    # ADR 對應到的台股代號；指數沒有對應
+    stock_code: str | None = None
+    rows: int = 0
+    start: date | None = None
+    end: date | None = None
+
+
+class OverseasStatusOut(BaseModel):
+    """美股指數與 ADR 的涵蓋範圍。"""
+
+    symbols: list[OverseasSymbolOut]
+    total_rows: int
+    missing: list[str]
+
+
 class ShareholdingStatusOut(BaseModel):
     """集保股權分散表的涵蓋範圍。週頻資料，所以看的是「幾週」而不是「幾天」。"""
 

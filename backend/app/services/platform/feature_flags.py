@@ -10,12 +10,14 @@ SCHEDULER_DAILY_STOCK_SYNC = "scheduler_daily_stock_sync"
 SCHEDULER_DAILY_BAR_BACKFILL = "scheduler_daily_bar_backfill"
 SCHEDULER_MODEL_SCORING = "scheduler_model_scoring"
 SCHEDULER_FUTURES_SYNC = "scheduler_futures_sync"
+SCHEDULER_OVERSEAS_SYNC = "scheduler_overseas_sync"
 
 FLAG_LABELS: dict[str, str] = {
     SCHEDULER_DAILY_STOCK_SYNC: "每日股票同步排程",
     SCHEDULER_DAILY_BAR_BACKFILL: "每日日K回補排程",
     SCHEDULER_MODEL_SCORING: "每日模型選股排程",
     SCHEDULER_FUTURES_SYNC: "每日台指期同步排程",
+    SCHEDULER_OVERSEAS_SYNC: "每日美股／ADR 同步排程",
 }
 
 FLAG_KEYS = list(FLAG_LABELS.keys())
@@ -24,6 +26,7 @@ MODEL_SYSTEM_FLAGS = [
     SCHEDULER_DAILY_STOCK_SYNC,
     SCHEDULER_DAILY_BAR_BACKFILL,
     SCHEDULER_FUTURES_SYNC,
+    SCHEDULER_OVERSEAS_SYNC,
     SCHEDULER_MODEL_SCORING,
 ]
 
@@ -35,6 +38,10 @@ FLAG_DESCRIPTIONS: dict[str, str] = {
     SCHEDULER_FUTURES_SYNC: (
         "每天 06:30 補上台指期／電子期的日盤與夜盤。夜盤 05:00 收，所以 06:30 抓得到當天那一節。"
         "關掉的話隔夜特徵會停在最後一次同步的日期，用到它的模型選股會拿到缺值。"
+    ),
+    SCHEDULER_OVERSEAS_SYNC: (
+        "每天 06:45 同步美股指數與台廠 ADR。美股 04:00（台北時間）收盤，所以 06:45 抓得到昨晚那一節。"
+        "關掉的話美股隔夜特徵會停在最後一次同步的日期。"
     ),
 }
 
