@@ -6,21 +6,17 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import User
-from app.services.auth import create_access_token, get_current_user, hash_password, verify_password
-from app.services.matching import create_account_for_user
+from app.services.platform.auth import create_access_token, get_current_user, hash_password, verify_password
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+# 只有登入與「我是誰」。註冊端點隨舊的多使用者模擬器一起下線——這個系統只有
+# 管理員會登入，帳號由 ensure_admin_user 在啟動時建立。
 
 
 class LoginPayload(BaseModel):
     username: str = Field(min_length=1, max_length=30)
     password: str = Field(min_length=1, max_length=100)
-
-
-class RegisterPayload(BaseModel):
-    username: str = Field(min_length=3, max_length=30)
-    password: str = Field(min_length=6, max_length=100)
-    nickname: str = Field(min_length=1, max_length=50)
 
 
 class TokenOut(BaseModel):
@@ -29,27 +25,6 @@ class TokenOut(BaseModel):
     username: str
     nickname: str
     is_admin: bool
-
-
-@router.post("/register", response_model=TokenOut, status_code=201)
-def register(payload: RegisterPayload, db: Session = Depends(get_db)):
-    existing = db.query(User).filter(User.username == payload.username).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="帳號已被使用")
-
-    nickname = payload.nickname.strip()
-    if not nickname:
-        raise HTTPException(status_code=422, detail="暱稱不可為空白")
-
-    user = User(username=payload.username, nickname=nickname, password_hash=hash_password(payload.password))
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-
-    create_account_for_user(db, user.id)
-
-    token = create_access_token(user.id)
-    return TokenOut(access_token=token, username=user.username, nickname=user.nickname, is_admin=user.is_admin)
 
 
 @router.post("/login", response_model=TokenOut)

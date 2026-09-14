@@ -27,18 +27,6 @@ class Market(str, enum.Enum):
     TPEX = "TPEX"
 
 
-class Side(str, enum.Enum):
-    BUY = "buy"
-    SELL = "sell"
-
-
-class OrderStatus(str, enum.Enum):
-    PENDING = "pending"
-    FILLED = "filled"
-    CANCELLED = "cancelled"
-    EXPIRED = "expired"
-
-
 class User(Base):
     __tablename__ = "users"
 
@@ -74,17 +62,6 @@ class FeatureFlag(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
 
-class Account(Base):
-    __tablename__ = "accounts"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True, nullable=False)
-    name: Mapped[str] = mapped_column(String(50), default="示範帳號")
-    cash_balance: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False)
-    frozen_cash: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
-
 class Stock(Base):
     __tablename__ = "stocks"
 
@@ -95,59 +72,6 @@ class Stock(Base):
     # ETF 與受益證券沒有產業別，維持 NULL
     industry: Mapped[str | None] = mapped_column(String(10), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-
-
-class Position(Base):
-    __tablename__ = "positions"
-    __table_args__ = (UniqueConstraint("account_id", "stock_code", name="uq_position_account_stock"),)
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), nullable=False)
-    stock_code: Mapped[str] = mapped_column(ForeignKey("stocks.code"), nullable=False)
-    quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    frozen_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    avg_cost: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False, default=0)
-
-    stock: Mapped["Stock"] = relationship()
-
-
-class Order(Base):
-    __tablename__ = "orders"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), nullable=False)
-    stock_code: Mapped[str] = mapped_column(ForeignKey("stocks.code"), nullable=False)
-    side: Mapped[Side] = mapped_column(Enum(Side), nullable=False)
-    order_type: Mapped[str] = mapped_column(String(10), nullable=False, default="limit")
-    price: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False)
-    stop_price: Mapped[float | None] = mapped_column(Numeric(18, 4), nullable=True)
-    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
-    status: Mapped[OrderStatus] = mapped_column(Enum(OrderStatus), nullable=False, default=OrderStatus.PENDING)
-    reserved_amount: Mapped[float | None] = mapped_column(Numeric(18, 4), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    filled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    filled_price: Mapped[float | None] = mapped_column(Numeric(18, 4), nullable=True)
-
-    stock: Mapped["Stock"] = relationship()
-
-
-class Trade(Base):
-    __tablename__ = "trades"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), nullable=False)
-    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), nullable=False)
-    stock_code: Mapped[str] = mapped_column(ForeignKey("stocks.code"), nullable=False)
-    side: Mapped[Side] = mapped_column(Enum(Side), nullable=False)
-    price: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False)
-    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
-    amount: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False)
-    fee: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False)
-    tax: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False, default=0)
-    realized_pnl: Mapped[float | None] = mapped_column(Numeric(18, 4), nullable=True)
-    executed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
-    stock: Mapped["Stock"] = relationship()
 
 
 class DailyBar(Base):
@@ -168,20 +92,6 @@ class DailyBar(Base):
     volume: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
 
 
-class PricePoint(Base):
-    """盤中即時價格快照，用來畫當日分時走勢線。由背景輪詢工作逐筆累積，
-    僅保留「有人持有」或「在某人自選股清單」的股票。每日同步時會清掉前一日以前
-    的資料（當日 OHLC 已經寫進 daily_bars，分時明細用不到），避免無限長大。"""
-
-    __tablename__ = "price_points"
-    __table_args__ = (Index("ix_price_points_stock_ts", "stock_code", "ts"),)
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    stock_code: Mapped[str] = mapped_column(ForeignKey("stocks.code"), nullable=False)
-    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    price: Mapped[float] = mapped_column(Float, nullable=False)
-
-
 class StockValuationHistory(Base):
     """個股本益比、殖利率、股價淨值比的歷史快照。TWSE 股票會用官方的「依日期查詢」
     端點一次回補約 3 年的月度快照；TPEx 沒有這種依日期查詢的公開端點，只能從系統
@@ -196,65 +106,6 @@ class StockValuationHistory(Base):
     pe_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
     dividend_yield: Mapped[float | None] = mapped_column(Float, nullable=True)
     pb_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
-
-
-class Strategy(Base):
-    """自動化交易策略。買進條件掃描全市場（凡是本地有足夠日K資料的股票都會被檢查），
-    依 rank_by 排序後只對前 top_n 檔下單；賣出條件套用在該帳戶「目前所有持股」上，
-    不限定是不是這組策略買的。同一帳戶同時只會有一組 is_active=True（由
-    routers/strategies.py 的 activate 端點負責切換，非資料庫層級約束）。"""
-
-    __tablename__ = "strategies"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), nullable=False)
-    name: Mapped[str] = mapped_column(String(50), nullable=False)
-    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
-    buy_conditions: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
-    sell_conditions: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
-    rank_by: Mapped[str] = mapped_column(String(20), nullable=False, default="change_percent")
-    rank_direction: Mapped[str] = mapped_column(String(4), nullable=False, default="desc")
-    top_n: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
-
-class StrategyTrade(Base):
-    """策略自動下單的執行紀錄，同時也是「同一天同一檔股票同方向不重複下單」的
-    去重依據——每分鐘都會重新檢查條件，沒有這個表會一直重複買/賣同一檔。"""
-
-    __tablename__ = "strategy_trades"
-    __table_args__ = (
-        UniqueConstraint("strategy_id", "stock_code", "side", "trade_date", name="uq_strategy_trade_daily"),
-    )
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    strategy_id: Mapped[int] = mapped_column(ForeignKey("strategies.id"), nullable=False)
-    stock_code: Mapped[str] = mapped_column(ForeignKey("stocks.code"), nullable=False)
-    side: Mapped[Side] = mapped_column(Enum(Side), nullable=False)
-    trade_date: Mapped[date] = mapped_column(Date, nullable=False)
-    order_id: Mapped[int | None] = mapped_column(ForeignKey("orders.id"), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
-    stock: Mapped["Stock"] = relationship()
-
-
-class EquitySnapshot(Base):
-    """帳戶每日績效快照（現金、部位市值、總資產），給「績效走勢圖」用。刻意
-    只在每日排程（見 services/equity.py）用 daily_bars 的收盤價計算，不即時
-    打報價 API——這樣使用者的績效歷史用不到額外的 API 額度，跟市價單共用
-    quote_cache 的節流精神一致。同一帳戶同一天只會有一筆（見 unique
-    constraint），排程重跑會直接覆蓋更新，不會重複累積。"""
-
-    __tablename__ = "equity_snapshots"
-    __table_args__ = (UniqueConstraint("account_id", "snapshot_date", name="uq_equity_snapshot_account_date"),)
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), nullable=False)
-    snapshot_date: Mapped[date] = mapped_column(Date, nullable=False)
-    cash_balance: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False)
-    market_value: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False)
-    total_assets: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False)
 
 
 class PredictionModel(Base):
@@ -396,6 +247,43 @@ class ShareholdingWeekly(Base):
     big_share_percent: Mapped[float] = mapped_column(Float, nullable=False)
 
 
+class FuturesDaily(Base):
+    """台指期／電子期的每日行情，日盤與夜盤分開存。
+
+    夜盤（期交所叫「盤後交易時段」）是這張表存在的理由：它的交易時間是
+    15:00 到隔日 05:00，**完整涵蓋美股盤中**。台股現貨在美股開盤時是休市的，
+    所以「美股隔夜怎麼走」對台股的影響，在現貨價格上要等到隔天 09:00 才看得到，
+    但在台指期夜盤上是即時反映的。
+
+    **日期歸屬要特別小心。** 期交所把「D−1 日 15:00 開始、D 日 05:00 結束」的
+    那一節標成日期 D。實測驗證方式是比對盤後開盤價跟前後日的日盤收盤價——
+    2020 與 2024 抽樣都顯示盤後開盤價貼近**前一日**日盤收盤（差 0~16 點），
+    而距同日日盤收盤動輒 100~300 點。
+
+    所以 session='night' 且 trade_date=D 的那一列，其資訊在 D 日 05:00 就已經
+    確定，早於 D 日 09:00 開盤——拿來當 D 日的特徵不會有 look-ahead。
+    """
+
+    __tablename__ = "futures_daily"
+    __table_args__ = (
+        UniqueConstraint("contract", "trade_date", "session", name="uq_futures_contract_date_session"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # TX=臺股期貨、TE=電子期貨。只存近月，遠月流動性低、價格代表性差
+    contract: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
+    trade_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    # day=一般交易時段、night=盤後交易時段
+    session: Mapped[str] = mapped_column(String(10), nullable=False)
+
+    open: Mapped[float] = mapped_column(Float, nullable=False)
+    high: Mapped[float] = mapped_column(Float, nullable=False)
+    low: Mapped[float] = mapped_column(Float, nullable=False)
+    close: Mapped[float] = mapped_column(Float, nullable=False)
+    volume: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    open_interest: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+
 class ModelScoringRun(Base):
     """每個模型每一天跑選股/出場判斷的執行紀錄，主要是為了記錄耗時，順便當成
     每日排程的稽核軌跡（哪天跑了、成功還失敗）。"""
@@ -452,16 +340,3 @@ class ModelHolding(Base):
     exit_reason: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
 
-class WatchlistItem(Base):
-    """使用者自選股清單，每個帳戶最多 20 檔。清單內的股票會被排入每日分時資料
-    的追蹤範圍（見 matching.run_matching_cycle），並顯示在該使用者首頁。"""
-
-    __tablename__ = "watchlist_items"
-    __table_args__ = (UniqueConstraint("account_id", "stock_code", name="uq_watchlist_account_stock"),)
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), nullable=False)
-    stock_code: Mapped[str] = mapped_column(ForeignKey("stocks.code"), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
-    stock: Mapped["Stock"] = relationship()

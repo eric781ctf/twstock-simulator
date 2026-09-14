@@ -1,0 +1,191 @@
+import asyncio
+import logging
+from datetime import date, timedelta
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
+from app.database import SessionLocal, get_db
+from app.models import ChipDaily, User
+from app.schemas import (
+    AdminAccountOut,
+    AdminAmountIn,
+    BackfillProgressOut,
+    BackfillStatusOut,
+    BackfillTargetIn,
+    ChipStatusOut,
+    DailyBarStatsOut,
+    DefaultInitialCashOut,
+    FeatureFlagOut,
+    FeatureFlagUpdateIn,
+    IndustryStatusOut,
+    SchedulerFlagOut,
+    ShareholdingStatusOut,
+)
+from app.services.ingest import backfill_status
+from app.services.ingest.chip_sync import backfill_chip_data, earliest_chip_date, latest_chip_date
+from app.services.ingest.industry_sync import coverage as industry_coverage, sync_industries
+from app.services.ingest.shareholding_sync import (
+    coverage as shareholding_coverage,
+    fetch_latest as fetch_latest_shareholding,
+    import_directory as import_shareholding_directory,
+)
+from app.services.platform.app_config import (
+    get_target_backfill_months,
+    set_target_backfill_months,
+)
+from app.services.platform.auth import require_admin
+from app.services.platform.feature_flags import FLAG_LABELS, get_all_flags, get_model_system_flags, set_flag
+from app.services.ingest.stock_sync import backfill_twse_daily_bars_by_date, get_daily_bar_stats, get_twse_earliest_bar_date
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+async def _run_backfill_task(months: int) -> None:
+    """admin 手動觸發的回補，走「逐日抓全市場」而不是「逐檔抓歷史」。
+
+    同樣補 N 個月，逐日只要每個交易日一次請求（6 個月約 120 次），逐檔則要
+    1380 檔 × N 個月（約 8000 次）。少打 98% 的請求，速度快得多，也不會一直
+    去撞 TWSE 的限流。"""
+    db = SessionLocal()
+    try:
+        end = date.today()
+        start = end - timedelta(days=months * 31)
+        await backfill_twse_daily_bars_by_date(db, start, end)
+    except Exception:
+        logger.exception("手動觸發的日K回補發生錯誤")
+    finally:
+        db.close()
+
+
+@router.get("/daily-bar-stats", response_model=DailyBarStatsOut)
+def get_daily_bar_stats_endpoint(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    stats = get_daily_bar_stats(db)
+    return DailyBarStatsOut(**stats)
+
+
+def _backfill_status_out(db: Session, months: int | None = None) -> BackfillStatusOut:
+    return BackfillStatusOut(
+        earliest_date=get_twse_earliest_bar_date(db),
+        target_months=months if months is not None else get_target_backfill_months(db),
+        progress=BackfillProgressOut(**backfill_status.snapshot()),
+    )
+
+
+@router.get("/models/backfill-status", response_model=BackfillStatusOut)
+def get_backfill_status(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    return _backfill_status_out(db)
+
+
+@router.post("/models/backfill", response_model=BackfillStatusOut)
+async def trigger_backfill(payload: BackfillTargetIn, db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    # 同時跑兩輪只會讓對 TWSE 的請求密度加倍，正好是節流想避免的事
+    if backfill_status.is_active():
+        raise HTTPException(status_code=409, detail="已經有一輪回補正在進行中，請等它跑完再調整目標月數")
+
+    months = set_target_backfill_months(db, payload.target_months)
+    asyncio.create_task(_run_backfill_task(months))
+    return _backfill_status_out(db, months)
+
+
+async def _run_chip_backfill_task(months: int) -> None:
+    """籌碼面回補的背景工作。自己開 session——背景任務不能沿用請求範圍的那個。"""
+    db = SessionLocal()
+    try:
+        end = date.today()
+        start = end - timedelta(days=months * 31)
+        await backfill_chip_data(db, start, end)
+    except Exception:
+        logger.exception("籌碼面回補失敗")
+    finally:
+        db.close()
+
+
+@router.get("/models/chip-status", response_model=ChipStatusOut)
+def get_chip_status(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    total = db.query(func.count(ChipDaily.id)).scalar() or 0
+    return ChipStatusOut(
+        earliest_date=earliest_chip_date(db),
+        latest_date=latest_chip_date(db),
+        total_rows=total,
+        progress=BackfillProgressOut(**backfill_status.snapshot()),
+    )
+
+
+@router.post("/models/chip-backfill", response_model=ChipStatusOut)
+async def trigger_chip_backfill(
+    payload: BackfillTargetIn, db: Session = Depends(get_db), _: User = Depends(require_admin)
+):
+    """回補籌碼面資料。跟日K回補共用同一個進度狀態，所以兩者不能同時跑——
+    真的同時跑只會讓對 TWSE 的請求密度加倍，正是節流想避免的事。"""
+    if backfill_status.is_active():
+        raise HTTPException(status_code=409, detail="已經有一輪回補正在進行中，請等它跑完")
+
+    asyncio.create_task(_run_chip_backfill_task(payload.target_months))
+    return get_chip_status(db)
+
+
+@router.get("/models/industry-status", response_model=IndustryStatusOut)
+def get_industry_status(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    return IndustryStatusOut(**industry_coverage(db))
+
+
+@router.post("/models/industry-sync", response_model=IndustryStatusOut)
+async def trigger_industry_sync(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    """從 TWSE 抓一次全上市公司的產業別。一次請求拿全部，不需要回補歷史。"""
+    result = await sync_industries(db)
+    status = industry_coverage(db)
+    status["message"] = result["message"]
+    return IndustryStatusOut(**status)
+
+
+@router.get("/models/shareholding-status", response_model=ShareholdingStatusOut)
+def get_shareholding_status(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    return ShareholdingStatusOut(**shareholding_coverage(db))
+
+
+@router.post("/models/shareholding-import", response_model=ShareholdingStatusOut)
+def trigger_shareholding_import(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    """把 backend/tdcc_data/ 底下的 TDCC CSV 匯入。
+
+    TDCC 的線上端點只給最新一週，歷史只能靠先前存下來的檔案，所以這是一次性的
+    匯入而不是回補。之後每週的新資料由 shareholding-fetch 接上。
+    """
+    result = import_shareholding_directory(db)
+    status = shareholding_coverage(db)
+    status["message"] = result["message"]
+    return ShareholdingStatusOut(**status)
+
+
+@router.post("/models/shareholding-fetch", response_model=ShareholdingStatusOut)
+async def trigger_shareholding_fetch(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    """從 TDCC 抓最新一週。只有最新一週，用來持續累積。"""
+    result = await fetch_latest_shareholding(db)
+    status = shareholding_coverage(db)
+    status["message"] = result["message"]
+    return ShareholdingStatusOut(**status)
+
+
+@router.get("/models/schedulers", response_model=list[SchedulerFlagOut])
+def list_model_schedulers(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    """只回傳跟預測模型系統有關的排程開關。切換沿用下面的 feature-flags 端點。"""
+    return [SchedulerFlagOut(**flag) for flag in get_model_system_flags(db)]
+
+
+@router.get("/feature-flags", response_model=list[FeatureFlagOut])
+def list_feature_flags(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    return get_all_flags(db)
+
+
+@router.post("/feature-flags/{key}", response_model=FeatureFlagOut)
+def update_feature_flag(
+    key: str, payload: FeatureFlagUpdateIn, db: Session = Depends(get_db), _: User = Depends(require_admin)
+):
+    try:
+        enabled = set_flag(db, key, payload.enabled)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return FeatureFlagOut(key=key, label=FLAG_LABELS[key], enabled=enabled)
