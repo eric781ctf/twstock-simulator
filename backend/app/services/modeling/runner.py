@@ -23,9 +23,17 @@ from app.models import PredictionModel
 from app.services.platform.clock import TAIPEI_TZ
 from app.services.modeling import artifacts
 from app.services.trading.backtest_eval import run_backtest
-from app.services.modeling.labels import purge_tail, attach_labels, split_by_date, to_matrix
+from app.services.modeling.labels import (
+    EXECUTION_MODES,
+    EXECUTION_NEXT_OPEN,
+    attach_labels,
+    purge_tail,
+    split_by_date,
+    to_matrix,
+)
 from app.services.features.transforms import SCALING_RANK, apply_scaler, fit_scaler, fit_scaler_sequences, industry_neutralize, rank_normalize
 from app.services.ingest.industry_sync import load_industry_map
+from app.services.features.futures import OVERNIGHT_FEATURE_KEYS
 from app.services.features.frame import FeatureFrame
 from app.services.features.builder import CROSS_SECTION_SKIP_KEYS, WARMUP_BARS, build_feature_rows
 from app.services.trading.selection import ModelBundle
@@ -163,6 +171,7 @@ def _prepare_rows(db: Session, model: PredictionModel, feature_keys: list[str], 
         model.threshold_percent,
         label_mode=model.label_mode,
         market_levels=levels,
+        execution_mode=model.execution_mode,
     )
     if not labeled:
         raise ValueError("這段期間沒有足夠的本地日K資料可以組出訓練樣本，請先回補更多歷史或調整日期區間")
@@ -230,14 +239,18 @@ DEFAULT_EMBARGO_DAYS = 1
 
 
 def _purge_days_for(model: PredictionModel) -> int:
-    """一折的邊界要砍掉幾個交易日 = label 長度 + embargo。
+    """一折的邊界要砍掉幾個交易日 = label 佔用的天數 + embargo。
 
     label 長度不是選項而是事實：n_days 就是每一筆樣本的答案往後看多遠，
     所以那幾天必然重疊下一段。embargo 才是可調的保守加碼。
+
+    next_open 模式要再多砍一天：那時基準日 D 的樣本是「開盤 D+1 → 開盤
+    D+1+n」，實際佔用的區間是 [D+1, D+1+n]，比 close 模式往後多伸一天。
     """
     config = model.walk_forward_config or {}
     embargo = int(config.get("embargo_days", DEFAULT_EMBARGO_DAYS))
-    return int(model.n_days) + max(embargo, 0)
+    span = int(model.n_days) + (1 if model.execution_mode == EXECUTION_NEXT_OPEN else 0)
+    return span + max(embargo, 0)
 
 
 def _fit_and_evaluate(
@@ -534,6 +547,29 @@ def _cpcv_warnings(summary: dict) -> list[str]:
     return warnings
 
 
+def validate_execution_mode(execution_mode: str, feature_keys: list[str]) -> None:
+    """成交模式與特徵集必須相容，不相容就直接讓訓練失敗。
+
+    隔夜特徵裝的是基準日收盤「之後」那一晚的事。在 close 模式（收盤決策、
+    收盤成交）下，成交發生在那一晚之前，所以那些欄位是不折不扣的 look-ahead：
+    模型會學到一個上線時根本取不到的訊號，回測漂亮、實際無效。
+
+    這裡刻意用例外而不是「自動把那幾欄拿掉」。靜默降級的話，使用者會以為
+    自己測的是隔夜特徵、實際上測的是別的東西，而那個誤會不會有任何跡象。
+    """
+    if execution_mode not in EXECUTION_MODES:
+        raise ValueError(f"不認得的成交模式：{execution_mode}")
+    if execution_mode == EXECUTION_NEXT_OPEN:
+        return
+    leaking = [k for k in feature_keys if k in set(OVERNIGHT_FEATURE_KEYS)]
+    if leaking:
+        raise ValueError(
+            "隔夜特徵只能搭配「盤前決策、開盤成交」（next_open）。"
+            "收盤成交模式下，這些欄位描述的是成交之後才發生的事，會造成 look-ahead："
+            + "、".join(leaking)
+        )
+
+
 def _train_sync(model_id: int) -> dict:
     """真正做事的地方，跑在獨立的 process 裡，所以自己開資料庫連線。"""
     db: Session = SessionLocal()
@@ -551,6 +587,7 @@ def _train_sync(model_id: int) -> dict:
         progress("preparing")
 
         feature_keys = list(model.feature_config)
+        validate_execution_mode(model.execution_mode, feature_keys)
         sequence_length = _sequence_length_for(model)
         labeled, bars_by_code = _prepare_rows(db, model, feature_keys, sequence_length)
 

@@ -121,6 +121,11 @@ export interface NetworkConfigInput {
   patience: number;
   batch_size: number;
 }
+/** 什麼時候成交，以及 label 量的是哪一段價格。
+ *  close 收盤決策收盤成交；next_open 盤前決策開盤成交。
+ *  兩者量的區間不同，Rank IC 不能互相比較。 */
+export type ExecutionMode = "close" | "next_open";
+
 export type LabelMode = "absolute" | "excess";
 export type ValidationMode = "single" | "walk_forward" | "cpcv";
 export type FeatureScaling = "zscore" | "cross_sectional_rank";
@@ -202,6 +207,8 @@ export interface FeaturePreset {
   label: string;
   description: string;
   features: string[];
+  /** 這組特徵只能搭配的成交模式；null 表示都可以 */
+  requires_execution_mode: ExecutionMode | null;
 }
 
 export interface TrainDefaults {
@@ -214,6 +221,8 @@ export interface TrainDefaults {
   test_end: string;
   default_features: string[];
   feature_presets: FeaturePreset[];
+  /** 只能搭配 next_open 的特徵；勾到任何一個就得用盤前決策 */
+  next_open_only_features: string[];
   features: FeatureOption[];
   model_types: ModelTypeOption[];
   score_formula: ScoreFormulaInfo;
@@ -226,6 +235,7 @@ export interface ModelTrainRequest {
   n_days: number;
   threshold_percent: number;
   label_mode: LabelMode;
+  execution_mode: ExecutionMode;
   validation_mode: ValidationMode;
   feature_scaling: FeatureScaling;
   industry_neutral: boolean;
@@ -342,6 +352,8 @@ export interface ModelSummary {
   threshold_percent: number;
   label_mode: string;
   label_mode_label: string;
+  execution_mode: string;
+  execution_mode_label: string;
   validation_mode: string;
   feature_scaling: string;
   feature_scaling_label: string;

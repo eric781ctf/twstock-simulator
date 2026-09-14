@@ -418,6 +418,40 @@ function BusinessSection({ catalog }: { catalog: ModelCatalog }) {
       </section>
 
       <section className="panel tutorial-card">
+        <h3 className="tutorial-heading">決策與成交的時點</h3>
+        <p>
+          「什麼時候決定、用什麼價格成交」不是細節，它同時決定了模型<strong>看得到哪些資料</strong>。
+          每個模型訓練時就選定一種，之後不會再變：
+        </p>
+        <div className="tutorial-grid">
+          <div>
+            <h4 className="tutorial-subheading">收盤決策、收盤成交</h4>
+            <p>
+              用前一個交易日收盤算出的訊號，在今天收盤成交。預測的是「收盤 D → 收盤 D+N」這一段。
+              資料只用得到收盤價，單純。
+            </p>
+          </div>
+          <div>
+            <h4 className="tutorial-subheading">盤前決策、開盤成交</h4>
+            <p>
+              一樣用前一個交易日的訊號，但決策提前到今天 09:00 之前，在開盤成交。
+              預測的是「開盤 D+1 → 開盤 D+1+N」。整段往後挪一天，持有長度不變。
+            </p>
+          </div>
+        </div>
+        <p>
+          提前到盤前的意義在於：台股收盤到隔天開盤之間，美股完整跑完一個交易日。
+          那段時間的資訊在現貨價格上完全看不到，但<strong>台指期夜盤（15:00 到隔日 05:00）是即時反映的</strong>。
+          只有盤前決策的模型才用得到那批資訊——收盤成交的模型，夜盤發生在它成交之後。
+        </p>
+        <p className="order-hint">
+          兩種模式量的是<strong>不同區間</strong>的報酬，所以 Rank IC 與回測數字不能互相比較。
+          換模式等於換一把尺，基準要重新建立。系統會擋住「收盤成交 + 隔夜特徵」這種組合，
+          不會靜默地把那些欄位拿掉——那樣你會以為自己測了隔夜特徵，其實沒有。
+        </p>
+      </section>
+
+      <section className="panel tutorial-card">
         <h3 className="tutorial-heading">為什麼要同時預測兩件事</h3>
         <p>每個模型都是「雙任務」的，同一組特徵同時餵給兩個輸出：</p>
         <div className="tutorial-grid">

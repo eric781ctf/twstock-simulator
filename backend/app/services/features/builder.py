@@ -21,6 +21,14 @@ from app.models import ChipDaily, DailyBar, Market, ShareholdingWeekly, Stock, S
 from app.services.features.indicators import compute_kd_series
 from app.services.ingest.industry_sync import INDUSTRY_NAMES, load_industry_map
 from app.services.features.frame import FeatureFrame
+from app.services.features.futures import (
+    FUTURES_FEATURE_KEYS,
+    FUTURES_FEATURE_LABELS,
+    MARKET_WIDE_KEYS as FUTURES_MARKET_WIDE_KEYS,
+    OVERNIGHT_FEATURE_KEYS,
+    build_futures_series,
+    rolling_beta,
+)
 from app.services.features.price import (
     PRICE_FEATURE_KEYS,
     WINDOWS,
@@ -47,7 +55,7 @@ MARKET_FEATURE_KEYS = [
 ]
 
 # 個股相對大盤的強弱——把市場方向這個最大的共同雜訊源減掉之後剩下的部分
-_RELATIVE_FEATURE_KEYS = ["relative_return_1d", "relative_return_20d"]
+_RELATIVE_FEATURE_KEYS = ["relative_return_1d", "relative_return_20d", "beta_60"]
 
 # 籌碼面：誰在買、誰在賣。一律除以成交量做正規化——原始股數在台積電和小型股
 # 之間差好幾個數量級，不除的話模型學到的會是「這是不是大型股」。
@@ -101,6 +109,8 @@ FEATURE_KEYS = (
     + CHIP_FEATURE_KEYS
     + SHAREHOLDING_FEATURE_KEYS
     + INDUSTRY_FEATURE_KEYS
+    + FUTURES_FEATURE_KEYS
+    + OVERNIGHT_FEATURE_KEYS
 )
 
 # 滾動類特徵是「運算子 × 視窗」的組合，標籤跟著組出來就好——手寫 28 個
@@ -149,6 +159,7 @@ FEATURE_LABELS: dict[str, str] = {
     "market_ma20_bias": "大盤 20 日均線乖離率",
     "relative_return_1d": "相對大盤強弱（當日）",
     "relative_return_20d": "相對大盤強弱（近 20 日）",
+    "beta_60": "對大盤的 60 日 beta",
     "foreign_net_ratio": "外資買賣超 / 成交量",
     "foreign_net_ratio_5d": "外資近 5 日買賣超 / 近 5 日成交量",
     "trust_net_ratio": "投信買賣超 / 成交量",
@@ -175,6 +186,7 @@ FEATURE_LABELS.update(
     {f"industry_{code}": f"產業別：{name}" for code, name in INDUSTRY_NAMES.items()}
 )
 FEATURE_LABELS["industry_unknown"] = "產業別：未分類（ETF、受益證券）"
+FEATURE_LABELS.update(FUTURES_FEATURE_LABELS)
 
 _missing = [key for key in FEATURE_KEYS if key not in FEATURE_LABELS]
 if _missing:
@@ -215,6 +227,17 @@ PRICE_ONLY_FEATURES = list(PRICE_FEATURE_KEYS) + _KD_FEATURE_KEYS
 # 跟精選只差 34 個 0/1 欄，其他完全相同。
 CURATED_WITH_INDUSTRY_FEATURES = CURATED_FEATURES + list(INDUSTRY_FEATURE_KEYS)
 
+# 精選＋隔夜：在精選之上加期貨基差與隔夜台指期。**只能配 execution_mode=
+# 'next_open'**——隔夜欄位裝的是基準日收盤之後那一晚的事，收盤成交的模式下
+# 那段資訊在成交時還不存在。選錯模式 runner 會直接讓訓練失敗。
+CURATED_WITH_OVERNIGHT_FEATURES = (
+    CURATED_FEATURES + ["beta_60"] + list(FUTURES_FEATURE_KEYS) + list(OVERNIGHT_FEATURE_KEYS)
+)
+
+# 「全部」不含隔夜欄位——那幾項只在盤前決策、開盤成交下合法，混進通用預設
+# 會讓一組本來哪種模式都能用的特徵集綁死一種成交方式
+ALPHA_LITE_FEATURES = [k for k in FEATURE_KEYS if k not in set(OVERNIGHT_FEATURE_KEYS)]
+
 DEFAULT_FEATURES = CURATED_FEATURES
 
 FEATURE_PRESETS: list[dict] = [
@@ -228,11 +251,11 @@ FEATURE_PRESETS: list[dict] = [
         "key": "alpha_lite",
         "label": "Alpha158 精簡版",
         "description": (
-            f"全部 {len(FEATURE_KEYS)} 項，做法參考 Qlib 的 Alpha158（K棒形狀 + 多視窗滾動統計），"
+            f"全部 {len(ALPHA_LITE_FEATURES)} 項（不含隔夜期貨），做法參考 Qlib 的 Alpha158（K棒形狀 + 多視窗滾動統計），"
             "但只取其中相關性較低的一部分。特徵多不等於比較好——樣本數沒變的情況下，"
             "更容易過擬合，樹模型還撐得住，線性模型會明顯受害。"
         ),
-        "features": list(FEATURE_KEYS),
+        "features": list(ALPHA_LITE_FEATURES),
     },
     {
         "key": "curated_industry",
@@ -242,6 +265,18 @@ FEATURE_PRESETS: list[dict] = [
             "跟「產業中性化」是相反的做法：中性化強制減掉產業成分，這個是把產業資訊交給模型自己決定怎麼用。"
         ),
         "features": CURATED_WITH_INDUSTRY_FEATURES,
+    },
+    {
+        "key": "curated_overnight",
+        "label": "精選＋隔夜期貨",
+        "description": (
+            f"精選的 {len(CURATED_FEATURES)} 項，加上 beta、期貨基差與 "
+            f"{len(OVERNIGHT_FEATURE_KEYS)} 項隔夜台指期欄位。"
+            "台股夜盤完整涵蓋美股盤中，這組特徵就是要把「昨晚美股怎麼走」帶進來。"
+            "只能搭配「盤前決策、開盤成交」，收盤成交模式下這些資訊在成交時還不存在。"
+        ),
+        "features": CURATED_WITH_OVERNIGHT_FEATURES,
+        "requires_execution_mode": "next_open",
     },
     {
         "key": "price_only",
@@ -257,7 +292,11 @@ FEATURE_PRESETS: list[dict] = [
 # 減掉中位數會讓整欄變成 0，等於把特徵消滅。產業 one-hot 是 0/1 的指示欄，
 # 排名會把它變成兩個沒有意義的小數、產業中性化更會讓它在自己那一組裡
 # 恆等於 0——它本來就不是拿來跟同業比大小的東西。
-CROSS_SECTION_SKIP_KEYS = frozenset(MARKET_FEATURE_KEYS) | frozenset(INDUSTRY_FEATURE_KEYS)
+CROSS_SECTION_SKIP_KEYS = (
+    frozenset(MARKET_FEATURE_KEYS)
+    | frozenset(INDUSTRY_FEATURE_KEYS)
+    | FUTURES_MARKET_WIDE_KEYS
+)
 
 # 指標要算得準（尤其 MA60）需要的暖身天數；資料不足這個長度的股票不會產生特徵列
 WARMUP_BARS = 60
@@ -505,16 +544,24 @@ def build_feature_rows(
     # 暖身期的列到這裡才丟掉——前面要留著，滾動視窗才算得出正確的值
     position = frame.groupby("stock_code", sort=False).cumcount().to_numpy()
     keep = (combined["as_of_date"] >= feature_start) & (position + 1 >= MIN_BARS_FOR_FEATURES)
-    combined = combined[keep].reset_index(drop=True)
+    market_series = build_market_series(bars_by_code)
+    market_returns = {d: v.get("market_return_1d") for d, v in market_series.items()}
+    # beta 的 60 日視窗需要暖身期那段歷史，所以在截斷前算；開盤價同理，
+    # 一起在這裡塞進 combined，之後就跟著各自那一列走
+    frame_extras = pd.DataFrame(
+        {"beta_60": rolling_beta(frame, market_returns), "open": frame["open"]}
+    )
+    combined = pd.concat([combined, frame_extras], axis=1)[keep].reset_index(drop=True)
     if combined.empty:
         return FeatureFrame.empty(list(FEATURE_KEYS)), bars_by_code
 
     combined = _attach_kd(combined, bars_by_code)
     combined = _attach_valuations(combined, db, fetch_start, fetch_end)
-    combined = _attach_market(combined, build_market_series(bars_by_code))
+    combined = _attach_market(combined, market_series)
     combined = _attach_chips(combined, db, fetch_start, fetch_end, frame)
     combined = _attach_shareholding(combined, db, fetch_start, fetch_end)
     combined = _attach_industry(combined, db)
+    combined = _attach_futures(combined, db, fetch_start, fetch_end, market_series)
 
     rows = _to_feature_frame(combined)
 
@@ -552,6 +599,8 @@ def _to_feature_frame(df: pd.DataFrame) -> FeatureFrame:
     # 所以隨身帶著。用 float64——單日成交股數會超過 float32 能精確表示的範圍
     extras = {
         "close": df["close"].to_numpy(dtype=np.float64, na_value=np.nan),
+        # next_open 模式用開盤價成交，也用它判斷是否跳空漲停買不到
+        "open": df["open"].to_numpy(dtype=np.float64, na_value=np.nan),
         "volume": df["volume"].to_numpy(dtype=np.float64, na_value=np.nan),
         "future_return_percent": np.full(len(df), np.nan, dtype=np.float64),
         "label": np.full(len(df), np.nan, dtype=np.float64),
@@ -564,6 +613,35 @@ def _to_feature_frame(df: pd.DataFrame) -> FeatureFrame:
         feature_keys=list(FEATURE_KEYS),
         extras=extras,
     )
+
+
+def _attach_futures(
+    combined: pd.DataFrame,
+    db: Session,
+    start: date,
+    end: date,
+    market_series: dict[date, dict],
+) -> pd.DataFrame:
+    """接上台指期／電子期特徵。
+
+    期貨每個交易日只有一組數字，依日期 map 過去即可；beta 已經在
+    build_feature_rows 裡算好塞進 combined 了。
+
+    隔夜欄位裝的是基準日收盤「之後」那一晚的事，只有 execution_mode=
+    'next_open' 時才合法——這件事由 runner 檢查，這裡只負責算出來。
+    """
+    trading_days = sorted(market_series.keys())
+    market_returns = {d: v.get("market_return_1d") for d, v in market_series.items()}
+    series = build_futures_series(db, start, end, market_returns, trading_days)
+    for key in FUTURES_FEATURE_KEYS + OVERNIGHT_FEATURE_KEYS:
+        if key == "overnight_beta_return":
+            continue
+        lookup = {day: values.get(key) for day, values in series.items()}
+        combined[key] = combined["as_of_date"].map(lookup)
+
+    # 隔夜漲跌幅全市場同值，乘上 beta 才有橫斷面的區別力
+    combined["overnight_beta_return"] = combined["beta_60"] * combined["overnight_tx_return"]
+    return combined
 
 
 def _attach_kd(combined: pd.DataFrame, bars_by_code: dict[str, list[DailyBar]]) -> pd.DataFrame:

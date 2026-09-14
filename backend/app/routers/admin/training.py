@@ -24,9 +24,10 @@ from app.schemas import (
 )
 from app.services.platform.auth import require_admin
 from app.services.modeling import artifacts
-from app.services.modeling.labels import LABEL_MODE_LABELS
+from app.services.modeling.labels import EXECUTION_MODE_LABELS, LABEL_MODE_LABELS
 from app.services.features.transforms import SCALING_MODE_LABELS
 from app.services.features.builder import DEFAULT_FEATURES, FEATURE_KEYS, FEATURE_LABELS, FEATURE_PRESETS
+from app.services.features.futures import OVERNIGHT_FEATURE_KEYS
 from app.services.trading.inference import latest_bar_date
 from app.services.trading.performance import summarize_holdings, training_metrics_summary
 from app.services.modeling.train import (
@@ -59,6 +60,7 @@ def get_train_defaults(db: Session = Depends(get_db), _: User = Depends(require_
         **suggest_split_dates(latest),
         default_features=DEFAULT_FEATURES,
         feature_presets=[FeaturePresetOut(**preset) for preset in FEATURE_PRESETS],
+        next_open_only_features=list(OVERNIGHT_FEATURE_KEYS),
         features=[FeatureOptionOut(key=key, label=FEATURE_LABELS[key]) for key in FEATURE_KEYS],
         model_types=[
             ModelTypeOptionOut(
@@ -90,6 +92,8 @@ def _to_summary(
         threshold_percent=model.threshold_percent,
         label_mode=model.label_mode,
         label_mode_label=LABEL_MODE_LABELS.get(model.label_mode, model.label_mode),
+        execution_mode=model.execution_mode,
+        execution_mode_label=EXECUTION_MODE_LABELS.get(model.execution_mode, model.execution_mode),
         validation_mode=model.validation_mode,
         feature_scaling=model.feature_scaling,
         feature_scaling_label=SCALING_MODE_LABELS.get(model.feature_scaling, model.feature_scaling),
@@ -145,6 +149,7 @@ async def create_model(
         n_days=payload.n_days,
         threshold_percent=payload.threshold_percent,
         label_mode=payload.label_mode,
+        execution_mode=payload.execution_mode,
         score_formula=SCORE_FORMULA_KEY,
         score_weights=payload.score_weights,
         network_config=payload.network_config.model_dump() if payload.network_config else None,

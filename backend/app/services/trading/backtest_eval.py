@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.models import DailyBar, ModelHolding, ModelPrediction, PredictionModel
 from app.services.trading.exit_rules import net_return_percent
+from app.services.modeling.labels import EXECUTION_NEXT_OPEN
 from app.services.trading.selection import ModelBundle, OpenPosition, predict_rows, run_daily_cycle
 
 logger = logging.getLogger(__name__)
@@ -65,10 +66,12 @@ def simulate_trading(
 ) -> dict:
     """逐日重播測試區間的選股與出場，把每一筆模擬持有寫進 model_holdings。
 
-    測試期結束時還開著的部位會用最後一天的收盤價強制平倉，理由標記成
+    測試期結束時還開著的部位會用最後一天的成交價強制平倉，理由標記成
     backtest_end——這樣每一筆都有完整報酬率可以畫圖，也清楚看得出來那不是
-    真的訊號觸發的出場。
+    真的訊號觸發的出場。成交價取收盤還是開盤跟著 execution_mode 走，不然
+    強制平倉這一筆會用另一種模式的價格，混進統計裡。
     """
+    price_column = "open" if model.execution_mode == EXECUTION_NEXT_OPEN else "close"
     rows_by_date = {day: test_rows.on_date(day) for day in test_rows.unique_dates()}
     trading_days = sorted(rows_by_date.keys())
     if not trading_days:
@@ -118,8 +121,9 @@ def simulate_trading(
     last_day = trading_days[-1]
     last_frame = rows_by_date[last_day]
     last_prices = {
-        code: float(close)
-        for code, close in zip(last_frame.stock_codes(), last_frame.column("close"))
+        code: float(price)
+        for code, price in zip(last_frame.stock_codes(), last_frame.column(price_column))
+        if price == price
     }
     for position in open_positions:
         exit_price = last_prices.get(position.stock_code, position.entry_price)

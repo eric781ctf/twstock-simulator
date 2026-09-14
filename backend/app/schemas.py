@@ -287,6 +287,9 @@ class FeaturePresetOut(BaseModel):
     label: str
     description: str
     features: list[str]
+    # 這組特徵只能搭配某一種成交模式時才有值（目前只有隔夜期貨那組）。
+    # 前端拿它來自動切換並鎖住成交模式，使用者不用自己記哪組配哪個
+    requires_execution_mode: str | None = None
 
 
 class TrainDefaultsOut(BaseModel):
@@ -302,6 +305,9 @@ class TrainDefaultsOut(BaseModel):
     test_end: date
     default_features: list[str]
     feature_presets: list[FeaturePresetOut]
+    # 只在 execution_mode='next_open' 下合法的特徵。前端用它決定要不要
+    # 把成交模式鎖住——不然使用者得等訓練跑起來才知道選錯
+    next_open_only_features: list[str] = []
     features: list[FeatureOptionOut]
     model_types: list[ModelTypeOptionOut]
     score_formula: ScoreFormulaInfoOut
@@ -316,6 +322,7 @@ class ModelTrainRequest(BaseModel):
     n_days: int = Field(gt=0, le=60)
     threshold_percent: float
     label_mode: Literal["absolute", "excess"] = "excess"
+    execution_mode: Literal["close", "next_open"] = "close"
     # 公式固定用橫斷面標準化，只有權重可調
     score_weights: dict | None = None
     network_config: NetworkConfigIn | None = None
@@ -368,6 +375,8 @@ class ModelSummaryOut(BaseModel):
     threshold_percent: float
     label_mode: str = "absolute"
     label_mode_label: str = ""
+    execution_mode: str = "close"
+    execution_mode_label: str = ""
     validation_mode: str = "single"
     feature_scaling: str = "zscore"
     feature_scaling_label: str = ""

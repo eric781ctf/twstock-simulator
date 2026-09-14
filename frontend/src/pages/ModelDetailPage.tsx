@@ -382,6 +382,9 @@ export default function ModelDetailPage() {
             ，以及是否超過 {summary.threshold_percent}%
           </div>
           <div>
+            <span className="label">決策與成交</span> {summary.execution_mode_label}
+          </div>
+          <div>
             <span className="label">訓練特徵</span> {detail.feature_labels.join("、")}
           </div>
           <div>

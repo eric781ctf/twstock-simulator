@@ -58,4 +58,10 @@ def run_lightweight_migrations(engine: Engine) -> None:
                 "label_mode VARCHAR(20) NOT NULL DEFAULT 'absolute'"
             )
         )
+        conn.execute(
+            text(
+                "ALTER TABLE prediction_models ADD COLUMN IF NOT EXISTS "
+                "execution_mode VARCHAR(20) NOT NULL DEFAULT 'close'"
+            )
+        )
     logger.info("run_lightweight_migrations 完成")
