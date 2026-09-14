@@ -11,7 +11,6 @@ interface AuthContextValue {
   isAdmin: boolean;
   isAuthenticated: boolean;
   login: (username: string, password: string) => Promise<void>;
-  register: (username: string, password: string, nickname: string) => Promise<void>;
   logout: () => void;
 }
 
@@ -50,18 +49,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setTokenPresent(true);
   }
 
-  async function register(user: string, password: string, nick: string) {
-    const res = await api.register(user, password, nick);
-    setToken(res.access_token);
-    localStorage.setItem(USERNAME_KEY, res.username);
-    localStorage.setItem(NICKNAME_KEY, res.nickname);
-    localStorage.setItem(IS_ADMIN_KEY, String(res.is_admin));
-    setUsername(res.username);
-    setNickname(res.nickname);
-    setIsAdmin(res.is_admin);
-    setTokenPresent(true);
-  }
-
   function logout() {
     setToken(null);
     localStorage.removeItem(USERNAME_KEY);
@@ -74,7 +61,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ username, nickname, isAdmin, isAuthenticated: tokenPresent, login, register, logout }}>
+    <AuthContext.Provider value={{ username, nickname, isAdmin, isAuthenticated: tokenPresent, login, logout }}>
       {children}
     </AuthContext.Provider>
   );

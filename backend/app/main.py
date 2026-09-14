@@ -7,31 +7,16 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import Base, SessionLocal, engine
-from app.routers import (
-    account,
-    admin,
-    auth,
-    feature_flags,
-    leaderboard,
-    market_data,
-    market_session,
-    models,
-    orders,
-    positions,
-    public_models,
-    stocks,
-    strategies,
-    trades,
-    watchlist,
-)
-from app.services.admin import ensure_admin_user
-from app.services.app_config import ensure_app_config
-from app.services.equity import snapshot_all_accounts_equity
-from app.services.feature_flags import SCHEDULER_DAILY_BAR_BACKFILL, ensure_feature_flags, is_enabled
-from app.services.migrations import run_lightweight_migrations
-from app.services.ml.training_runner import recover_orphaned_jobs, shutdown_executor
-from app.services.scheduler import start_scheduler, stop_scheduler
-from app.services.stock_sync import backfill_twse_to_target, backfill_valuation_history, sync_stocks, sync_valuations
+from app.routers import auth
+from app.routers.admin import data as admin_data, training as admin_training
+from app.routers.public import feature_flags as public_flags, models as public_models
+from app.services.platform.auth import ensure_admin_user
+from app.services.platform.app_config import ensure_app_config
+from app.services.platform.feature_flags import SCHEDULER_DAILY_BAR_BACKFILL, ensure_feature_flags, is_enabled
+from app.services.platform.migrations import run_lightweight_migrations
+from app.services.modeling.runner import recover_orphaned_jobs, shutdown_executor
+from app.services.platform.scheduler import start_scheduler, stop_scheduler
+from app.services.ingest.stock_sync import backfill_twse_to_target, backfill_valuation_history, sync_stocks, sync_valuations
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -78,7 +63,6 @@ async def lifespan(app: FastAPI):
         if count == 0:
             logger.warning("啟動時股票清單同步失敗或無資料，將於背景排程重試")
         await sync_valuations(db)
-        snapshot_all_accounts_equity(db)
     finally:
         db.close()
 
@@ -112,20 +96,10 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
-app.include_router(stocks.router)
-app.include_router(account.router)
-app.include_router(positions.router)
-app.include_router(orders.router)
-app.include_router(trades.router)
-app.include_router(market_data.router)
-app.include_router(watchlist.router)
-app.include_router(leaderboard.router)
-app.include_router(market_session.router)
-app.include_router(models.router)
+app.include_router(admin_training.router)
 app.include_router(public_models.router)
-app.include_router(strategies.router)
-app.include_router(admin.router)
-app.include_router(feature_flags.router)
+app.include_router(admin_data.router)
+app.include_router(public_flags.router)
 
 
 @app.get("/health")
