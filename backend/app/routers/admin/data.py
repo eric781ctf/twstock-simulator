@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
@@ -15,6 +15,7 @@ from app.schemas import (
     BackfillStatusOut,
     BackfillTargetIn,
     ChipStatusOut,
+    OverseasStatusOut,
     DailyBarStatsOut,
     DefaultInitialCashOut,
     FeatureFlagOut,
@@ -23,7 +24,7 @@ from app.schemas import (
     SchedulerFlagOut,
     ShareholdingStatusOut,
 )
-from app.services.ingest import backfill_status
+from app.services.ingest import backfill_status, overseas_sync
 from app.services.ingest.chip_sync import backfill_chip_data, earliest_chip_date, latest_chip_date
 from app.services.ingest.industry_sync import coverage as industry_coverage, sync_industries
 from app.services.ingest.shareholding_sync import (
@@ -36,6 +37,7 @@ from app.services.platform.app_config import (
     set_target_backfill_months,
 )
 from app.services.platform.auth import require_admin
+from app.services.platform.clock import TAIPEI_TZ
 from app.services.platform.feature_flags import FLAG_LABELS, get_all_flags, get_model_system_flags, set_flag
 from app.services.ingest.stock_sync import backfill_twse_daily_bars_by_date, get_daily_bar_stats, get_twse_earliest_bar_date
 
@@ -126,6 +128,23 @@ async def trigger_chip_backfill(
 
     asyncio.create_task(_run_chip_backfill_task(payload.target_months))
     return get_chip_status(db)
+
+
+@router.get("/models/overseas-status", response_model=OverseasStatusOut)
+def get_overseas_status(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    return OverseasStatusOut(**overseas_sync.coverage(db))
+
+
+@router.post("/models/overseas-sync", response_model=OverseasStatusOut)
+async def trigger_overseas_sync(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    """回補美股指數與 ADR。
+
+    跟日K／籌碼面的回補不共用進度狀態，因為它打的是 Yahoo 而不是 TWSE——
+    兩者的速率限制互不相干，沒有理由讓它們互相排隊。而且這裡一個代號一個
+    請求、總共九個，幾秒就跑完，不需要進度回報。
+    """
+    await overseas_sync.backfill(db, date(2020, 1, 1), datetime.now(TAIPEI_TZ).date())
+    return get_overseas_status(db)
 
 
 @router.get("/models/industry-status", response_model=IndustryStatusOut)

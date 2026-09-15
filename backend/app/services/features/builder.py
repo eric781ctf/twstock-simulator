@@ -21,6 +21,15 @@ from app.models import ChipDaily, DailyBar, Market, ShareholdingWeekly, Stock, S
 from app.services.features.indicators import compute_kd_series
 from app.services.ingest.industry_sync import INDUSTRY_NAMES, load_industry_map
 from app.services.features.frame import FeatureFrame
+from app.services.features.overseas import (
+    MARKET_WIDE_KEYS as OVERSEAS_MARKET_WIDE_KEYS,
+    OVERSEAS_FEATURE_KEYS,
+    OVERSEAS_FEATURE_LABELS,
+    US_CROSS_FEATURE_KEYS,
+    attach as attach_overseas,
+    build_overseas_series,
+    gap_sensitivity,
+)
 from app.services.features.futures import (
     FUTURES_FEATURE_KEYS,
     FUTURES_FEATURE_LABELS,
@@ -111,6 +120,7 @@ FEATURE_KEYS = (
     + INDUSTRY_FEATURE_KEYS
     + FUTURES_FEATURE_KEYS
     + OVERNIGHT_FEATURE_KEYS
+    + OVERSEAS_FEATURE_KEYS
 )
 
 # 滾動類特徵是「運算子 × 視窗」的組合，標籤跟著組出來就好——手寫 28 個
@@ -187,6 +197,7 @@ FEATURE_LABELS.update(
 )
 FEATURE_LABELS["industry_unknown"] = "產業別：未分類（ETF、受益證券）"
 FEATURE_LABELS.update(FUTURES_FEATURE_LABELS)
+FEATURE_LABELS.update(OVERSEAS_FEATURE_LABELS)
 
 _missing = [key for key in FEATURE_KEYS if key not in FEATURE_LABELS]
 if _missing:
@@ -234,9 +245,21 @@ CURATED_WITH_OVERNIGHT_FEATURES = (
     CURATED_FEATURES + ["beta_60"] + list(FUTURES_FEATURE_KEYS) + list(OVERNIGHT_FEATURE_KEYS)
 )
 
+# 精選＋美股：重點在「橫斷面」那四項。隔夜台指期實測沒有用，原因是六項裡有
+# 五項對全市場同值——對「當天挑前 10 名」這種排序沒有直接的區別力。美股這組
+# 刻意只帶四項市場級（當基準線），另外四項是真的每檔不同的：族群指數依產業
+# 對應、ADR 只屬於那四檔有 ADR 的公司。
+CURATED_WITH_US_FEATURES = CURATED_FEATURES + ["beta_60"] + list(OVERSEAS_FEATURE_KEYS)
+
+# 只留橫斷面那四項，市場級全部拿掉。用來分辨「美股資訊有沒有用」跟
+# 「市場級欄位是不是在拖後腿」這兩件不同的事
+CURATED_WITH_US_CROSS_FEATURES = CURATED_FEATURES + ["beta_60"] + list(US_CROSS_FEATURE_KEYS)
+
 # 「全部」不含隔夜欄位——那幾項只在盤前決策、開盤成交下合法，混進通用預設
 # 會讓一組本來哪種模式都能用的特徵集綁死一種成交方式
-ALPHA_LITE_FEATURES = [k for k in FEATURE_KEYS if k not in set(OVERNIGHT_FEATURE_KEYS)]
+NEXT_OPEN_ONLY_KEYS = list(OVERNIGHT_FEATURE_KEYS) + list(OVERSEAS_FEATURE_KEYS)
+
+ALPHA_LITE_FEATURES = [k for k in FEATURE_KEYS if k not in set(NEXT_OPEN_ONLY_KEYS)]
 
 DEFAULT_FEATURES = CURATED_FEATURES
 
@@ -279,6 +302,28 @@ FEATURE_PRESETS: list[dict] = [
         "requires_execution_mode": "next_open",
     },
     {
+        "key": "curated_us",
+        "label": "精選＋美股隔夜",
+        "description": (
+            f"精選的 {len(CURATED_FEATURES)} 項，加上 beta 與 {len(OVERSEAS_FEATURE_KEYS)} 項美股隔夜欄位"
+            "（費半／那斯達克／道瓊／VIX，加上依產業對應的族群指數與台廠 ADR）。"
+            "只能搭配「盤前決策、開盤成交」。"
+        ),
+        "features": CURATED_WITH_US_FEATURES,
+        "requires_execution_mode": "next_open",
+    },
+    {
+        "key": "curated_us_cross",
+        "label": "精選＋美股（只留橫斷面）",
+        "description": (
+            "同上，但拿掉四項「同一天對全市場同值」的指數欄位，只留下族群對應與 ADR。"
+            "市場級欄位對當天的排序沒有直接區別力，只能讓樹去切「今天是什麼樣的日子」——"
+            "這組是用來檢驗那個猜測的對照組。"
+        ),
+        "features": CURATED_WITH_US_CROSS_FEATURES,
+        "requires_execution_mode": "next_open",
+    },
+    {
         "key": "price_only",
         "label": "純價量",
         "description": f"只用價量與技術指標的 {len(PRICE_ONLY_FEATURES)} 項，不含估值、大盤與籌碼面。適合當對照組。",
@@ -296,6 +341,7 @@ CROSS_SECTION_SKIP_KEYS = (
     frozenset(MARKET_FEATURE_KEYS)
     | frozenset(INDUSTRY_FEATURE_KEYS)
     | FUTURES_MARKET_WIDE_KEYS
+    | OVERSEAS_MARKET_WIDE_KEYS
 )
 
 # 指標要算得準（尤其 MA60）需要的暖身天數；資料不足這個長度的股票不會產生特徵列
@@ -481,7 +527,7 @@ def _attach_shareholding(combined: pd.DataFrame, db: Session, start: date, end: 
     return merged.sort_values(["stock_code", "as_of_date"]).reset_index(drop=True)
 
 
-def _attach_industry(combined: pd.DataFrame, db: Session) -> pd.DataFrame:
+def _attach_industry(combined: pd.DataFrame, industry_map: dict[str, str]) -> pd.DataFrame:
     """把產業別攤成 one-hot 欄位。
 
     產業別沒有歷史（TWSE 只給現在的分類），所以整段期間都用現況——同一檔
@@ -491,7 +537,6 @@ def _attach_industry(combined: pd.DataFrame, db: Session) -> pd.DataFrame:
     「不屬於任何已知產業」本身就是一個有意義的類別，全 0 會讓模型分不出
     「沒有分類」跟「分類欄位剛好都不是」。
     """
-    industry_map = load_industry_map(db)
     codes = combined["stock_code"].map(lambda c: industry_map.get(c))
 
     for code in sorted(INDUSTRY_NAMES):
@@ -546,10 +591,20 @@ def build_feature_rows(
     keep = (combined["as_of_date"] >= feature_start) & (position + 1 >= MIN_BARS_FOR_FEATURES)
     market_series = build_market_series(bars_by_code)
     market_returns = {d: v.get("market_return_1d") for d, v in market_series.items()}
-    # beta 的 60 日視窗需要暖身期那段歷史，所以在截斷前算；開盤價同理，
-    # 一起在這裡塞進 combined，之後就跟著各自那一列走
+    trading_days = sorted(market_series.keys())
+    industry_map = load_industry_map(db)
+    overseas_series = build_overseas_series(db, fetch_start, fetch_end, trading_days)
+
+    # 這三欄的滾動視窗都需要暖身期那段歷史，所以在截斷前算；開盤價同理。
+    # 一起在這裡塞進 combined，之後就跟著各自那一列走，後面的 merge 重排也不會錯位
     frame_extras = pd.DataFrame(
-        {"beta_60": rolling_beta(frame, market_returns), "open": frame["open"]}
+        {
+            "beta_60": rolling_beta(frame, market_returns),
+            "us_gap_sensitivity": gap_sensitivity(
+                frame, overseas_series, industry_map, trading_days
+            ),
+            "open": frame["open"],
+        }
     )
     combined = pd.concat([combined, frame_extras], axis=1)[keep].reset_index(drop=True)
     if combined.empty:
@@ -560,8 +615,9 @@ def build_feature_rows(
     combined = _attach_market(combined, market_series)
     combined = _attach_chips(combined, db, fetch_start, fetch_end, frame)
     combined = _attach_shareholding(combined, db, fetch_start, fetch_end)
-    combined = _attach_industry(combined, db)
+    combined = _attach_industry(combined, industry_map)
     combined = _attach_futures(combined, db, fetch_start, fetch_end, market_series)
+    combined = attach_overseas(combined, overseas_series, industry_map)
 
     rows = _to_feature_frame(combined)
 

@@ -495,6 +495,22 @@ export interface ShareholdingStatus {
   message: string | null;
 }
 
+export interface OverseasSymbol {
+  symbol: string;
+  /** index=指數（族群連動來源）、adr=台廠 ADR（個股層級） */
+  kind: "index" | "adr";
+  stock_code: string | null;
+  rows: number;
+  start: string | null;
+  end: string | null;
+}
+
+export interface OverseasStatus {
+  symbols: OverseasSymbol[];
+  total_rows: number;
+  missing: string[];
+}
+
 export interface IndustryStatus {
   total_stocks: number;
   /** ETF 與受益證券沒有產業別，所以一定小於 total_stocks */

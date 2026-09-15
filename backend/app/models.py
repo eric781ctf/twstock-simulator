@@ -294,6 +294,35 @@ class FuturesDaily(Base):
     open_interest: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
 
+class OverseasDaily(Base):
+    """美股指數與台廠 ADR 的每日行情。
+
+    台股 13:30 收盤之後，美股才開盤（21:30 台北時間）並在隔天 04:00 收盤。
+    所以**美股日期 d 的那一節，發生在台股 d 日收盤之後、d+1 日開盤之前**——
+    對盤前決策的模型來說是可用的資訊，對收盤成交的模型則是未來。
+
+    這張表跟 futures_daily 分開：期貨是台灣自己的商品、來源是期交所；這裡
+    是美股，來源是 Yahoo。兩者的日期語意也不同（期交所把夜盤標成隔天，
+    美股就是當天），混在一張表裡遲早會有人弄錯其中一種。
+    """
+
+    __tablename__ = "overseas_daily"
+    __table_args__ = (
+        UniqueConstraint("symbol", "trade_date", name="uq_overseas_symbol_date"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # Yahoo 的代號：指數以 ^ 開頭（^SOX、^NDX），ADR 是普通股票代號（TSM、UMC）
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    trade_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+
+    open: Mapped[float | None] = mapped_column(Float, nullable=True)
+    high: Mapped[float | None] = mapped_column(Float, nullable=True)
+    low: Mapped[float | None] = mapped_column(Float, nullable=True)
+    close: Mapped[float] = mapped_column(Float, nullable=False)
+    volume: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+
 class ModelScoringRun(Base):
     """每個模型每一天跑選股/出場判斷的執行紀錄，主要是為了記錄耗時，順便當成
     每日排程的稽核軌跡（哪天跑了、成功還失敗）。"""
