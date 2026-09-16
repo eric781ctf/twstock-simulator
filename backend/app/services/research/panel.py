@@ -4,13 +4,16 @@
 研究的運算幾乎都是「同一天跨股票比」或「同一檔跨時間滾動」，寬矩陣兩個方向
 都是一次向量化，比長表 groupby 快得多，也比較不容易對錯行。
 
-這裡同時負責兩件長表管線目前沒做的清理（見 README 或 commit 說明）：
+這裡同時負責三件長表管線目前沒做的清理（見 README 或 commit 說明）：
 
 1. **只留普通股**。上市清單裡混著 240 檔 ETF，包含槓桿與反向型。VCP 與族群
    聯動是選股方法，ETF 進來只會污染基準線。
 2. **標出公司行動造成的價格跳動**。日K沒有還原除權息，台股漲跌幅上限 10%，
    收盤對收盤超過 ±10.5% 的一定不是正常交易（減資、反分割、新股前五日）。
    一般現金股利跌幅在 10% 以內，從價格本身偵測不出來——這是已知限制。
+3. **標出下市股票**。已下市股票的日K停在最後一個交易日，持有期跨過那天的
+   報酬要用最後的價格結算，不能因為「出場日沒有價格」就整筆丟掉——那正是
+   跌得最慘的那一批。見 event_study.forward_returns。
 """
 
 import logging
@@ -22,7 +25,8 @@ import pandas as pd
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import DailyBar, Market, Stock
+from app.models import LISTING_DELISTED, DailyBar, Market, Stock
+from app.services.ingest.universe import is_ordinary_stock
 
 logger = logging.getLogger(__name__)
 
@@ -30,11 +34,6 @@ logger = logging.getLogger(__name__)
 CORPORATE_ACTION_THRESHOLD = 0.105
 # 開盤跳空到這個幅度視為漲停鎖死，開盤買不到（跟 exit_rules 同一個門檻）
 LIMIT_UP_THRESHOLD = 0.095
-
-
-def is_ordinary_stock(code: str) -> bool:
-    """4 碼且不是 00 開頭。00 開頭是 ETF，5／6 碼是特別股、ETF、TDR 之類。"""
-    return len(code) == 4 and code.isdigit() and not code.startswith("00")
 
 
 @dataclass
@@ -48,6 +47,8 @@ class PricePanel:
     volume: np.ndarray
     # jump[t, i]：第 t 天收盤相對前一根 K 棒超過 ±10.5%
     jump: np.ndarray
+    # delisted[i]：第 i 檔已經下市，它的最後一根 K 棒之後不會再有價格
+    delisted: np.ndarray
 
     @property
     def shape(self) -> tuple[int, int]:
@@ -67,11 +68,12 @@ def load_panel(db: Session) -> PricePanel:
             DailyBar.low,
             DailyBar.close,
             DailyBar.volume,
+            Stock.listing_status,
         )
         .join(Stock, Stock.code == DailyBar.stock_code)
         .where(Stock.market == Market.TWSE)
     ).all()
-    df = pd.DataFrame(rows, columns=["code", "date", "open", "high", "low", "close", "volume"])
+    df = pd.DataFrame(rows, columns=["code", "date", "open", "high", "low", "close", "volume", "status"])
     total_codes = df["code"].nunique()
     df = df[df["code"].map(is_ordinary_stock)]
     logger.info("load_panel: 上市代號 %d 個，其中普通股 %d 個", total_codes, df["code"].nunique())
@@ -97,10 +99,11 @@ def load_panel(db: Session) -> PricePanel:
         close=close.to_numpy(dtype=float),
         volume=wide["volume"].to_numpy(dtype=float),
         jump=jump,
+        delisted=(df.groupby("code")["status"].first().reindex(close.columns) == LISTING_DELISTED).to_numpy(),
     )
     logger.info(
-        "load_panel: %d 個交易日 × %d 檔，公司行動跳動 %d 次",
-        panel.shape[0], panel.shape[1], int(jump.sum()),
+        "load_panel: %d 個交易日 × %d 檔（其中下市 %d 檔），公司行動跳動 %d 次",
+        panel.shape[0], panel.shape[1], int(panel.delisted.sum()), int(jump.sum()),
     )
     return panel
 

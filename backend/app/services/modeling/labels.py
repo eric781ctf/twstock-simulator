@@ -49,6 +49,7 @@ def attach_labels(
     label_mode: str = LABEL_ABSOLUTE,
     market_levels: dict[date, float] | None = None,
     execution_mode: str = EXECUTION_CLOSE,
+    delisted_codes: set[str] | None = None,
 ) -> FeatureFrame:
     """替每一列補上未來 n 個交易日的報酬率與是否達標。
 
@@ -78,6 +79,11 @@ def attach_labels(
     等於要重建基準。
 
     沒有 label 的列（資料尾端不足 n 根）直接排除，回傳新的 FeatureFrame。
+
+    **下市股票例外**（delisted_codes）：它們的 K 棒不足 n 根不是因為「未來還沒
+    發生」，而是公司已經不在了。整筆丟掉的話，剛好丟掉持有到下市、跌最慘的
+    那批樣本。這種情況用最後一根 K 棒的收盤價結算，期間取「市場上從進場日往後
+    數 n 個交易日」；那一天超出資料範圍的話，仍然當作沒有 label。
     """
     n = len(rows)
     if n == 0:
@@ -103,6 +109,15 @@ def attach_labels(
     future_return = np.full(n, np.nan, dtype=np.float64)
     codes = rows.stock_codes()
 
+    # 只有真的有下市股票時才需要市場交易日曆（算「本來該出場的那一天」）
+    delisted_codes = {c for c in (delisted_codes or ()) if c in bars_by_code}
+    calendar: list[date] = []
+    calendar_index: dict[date, int] = {}
+    if delisted_codes:
+        calendar = sorted({d for dates in dates_by_code.values() for d in dates})
+        calendar_index = {d: i for i, d in enumerate(calendar)}
+    settled = 0
+
     for i in range(n):
         code = codes[i]
         index_map = index_by_code.get(code)
@@ -114,10 +129,23 @@ def attach_labels(
             continue
         start_index = j + entry_offset
         exit_index = start_index + n_days
-        if exit_index >= len(prices[code]):
-            continue
+        if start_index >= len(prices[code]):
+            continue  # 下一根 K 棒不存在，開盤買不到
         entry = prices[code][start_index]
-        exit_price = prices[code][exit_index]
+        entry_date = dates_by_code[code][start_index]
+        if exit_index < len(prices[code]):
+            exit_price = prices[code][exit_index]
+            exit_date = dates_by_code[code][exit_index]
+        elif code in delisted_codes:
+            # 下市：最後一根 K 棒之後就沒有價格了，用最後收盤價結算
+            market_exit = calendar_index[entry_date] + n_days
+            if market_exit >= len(calendar):
+                continue  # 本來該出場的那天超出資料範圍，跟下市無關
+            exit_price = closes_by_code[code][-1]
+            exit_date = calendar[market_exit]
+            settled += 1
+        else:
+            continue
         if not entry or entry <= 0:
             continue
         value = (exit_price - entry) / entry * 100
@@ -125,11 +153,7 @@ def attach_labels(
         if label_mode == LABEL_EXCESS:
             # 大盤要比的是「這筆持有實際經過的那一段」，所以起點也跟著
             # entry_offset 移動——不然 next_open 模式會拿多一天的大盤報酬去減
-            market = _market_return_between(
-                market_levels,
-                dates_by_code[code][start_index],
-                dates_by_code[code][exit_index],
-            )
+            market = _market_return_between(market_levels, entry_date, exit_date)
             if market is None:
                 continue
             value -= market
@@ -142,11 +166,12 @@ def attach_labels(
     labeled.set_column("label", (kept_returns > threshold_percent).astype(np.float64))
 
     logger.info(
-        "attach_labels(%s/%s): %d 列有完整 label（原始 %d 列）",
+        "attach_labels(%s/%s): %d 列有完整 label（原始 %d 列，其中 %d 列持有到下市、用最後收盤價結算）",
         label_mode,
         execution_mode,
         len(labeled),
         n,
+        settled,
     )
     return labeled
 

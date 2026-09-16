@@ -73,6 +73,9 @@ def forward_returns(panel: PricePanel, h: int, liquid: np.ndarray) -> tuple[np.n
     """回傳 (原始報酬%, 可交易遮罩)。進場 D+1 開盤、出場 D+1+h 開盤。"""
     entry = shift(panel.open, -1)
     exit_ = shift(panel.open, -(1 + h))
+    settled = settle_delisted_exits(panel, exit_, h)
+    if settled:
+        logger.info("持有 %d 天：%d 個樣本的持有期跨過下市日，用最後收盤價結算", h, settled)
     with np.errstate(invalid="ignore", divide="ignore"):
         raw = (exit_ / entry - 1) * 100
         gap = entry / panel.close - 1
@@ -83,6 +86,32 @@ def forward_returns(panel: PricePanel, h: int, liquid: np.ndarray) -> tuple[np.n
         & ~jump_in_window(panel, 1, 1 + h)      # 持有期間有公司行動，報酬不可信
     )
     return raw, tradable
+
+
+def settle_delisted_exits(panel: PricePanel, exit_: np.ndarray, h: int) -> int:
+    """持有期跨過下市日的樣本，出場價改用最後一個交易日的收盤價（就地修改）。
+
+    不處理的話，出場日沒有價格 → 報酬是 NaN → 整筆被當成「不可交易」丟掉，
+    被丟掉的剛好是持有到下市的那一批。最後收盤價對併購下市（收購價附近成交）
+    是好的近似；對全額交割後停止買賣的，實際能拿回的通常更少，所以這樣算
+    仍然偏樂觀，只是比整筆丟掉誠實得多。
+
+    只處理「進場時還有價格、出場日落在最後一根 K 棒之後、而且出場日沒有超出
+    面板尾端」的樣本；面板尾端本來就沒有未來價格，那跟下市無關。回傳結算筆數。
+    """
+    T = exit_.shape[0]
+    settled = 0
+    for i in np.flatnonzero(panel.delisted):
+        traded = np.flatnonzero(np.isfinite(panel.close[:, i]))
+        if len(traded) == 0 or traded[-1] >= T - 1:
+            continue
+        last = traded[-1]
+        # 訊號日 t：進場 t+1 ≤ last，出場 t+1+h > last，且出場日仍在面板內
+        days = np.arange(max(last - h, 0), min(last, T - 1 - h))
+        days = days[~np.isfinite(exit_[days, i])]
+        exit_[days, i] = panel.close[last, i]
+        settled += len(days)
+    return settled
 
 
 def lookback_returns(panel: PricePanel, days: int) -> np.ndarray:

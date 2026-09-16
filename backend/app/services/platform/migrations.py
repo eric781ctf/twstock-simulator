@@ -31,6 +31,11 @@ def run_lightweight_migrations(engine: Engine) -> None:
         conn.execute(text("ALTER TABLE chip_daily ADD COLUMN IF NOT EXISTS foreign_holding_ratio DOUBLE PRECISION"))
         conn.execute(text("ALTER TABLE stocks ADD COLUMN IF NOT EXISTS industry VARCHAR(10)"))
         conn.execute(
+            text("ALTER TABLE stocks ADD COLUMN IF NOT EXISTS listing_status VARCHAR(10) NOT NULL DEFAULT 'listed'")
+        )
+        conn.execute(text("ALTER TABLE stocks ADD COLUMN IF NOT EXISTS last_listed_on DATE"))
+        conn.execute(text("ALTER TABLE stocks ADD COLUMN IF NOT EXISTS delisted_on DATE"))
+        conn.execute(
             text(
                 "ALTER TABLE prediction_models ADD COLUMN IF NOT EXISTS "
                 "industry_neutral BOOLEAN NOT NULL DEFAULT FALSE"

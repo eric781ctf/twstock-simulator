@@ -33,6 +33,7 @@ from app.services.modeling.labels import (
 )
 from app.services.features.transforms import SCALING_RANK, apply_scaler, fit_scaler, fit_scaler_sequences, industry_neutralize, rank_normalize
 from app.services.ingest.industry_sync import load_industry_map
+from app.services.ingest.universe import load_delisted_codes
 from app.services.features.frame import FeatureFrame
 from app.services.features.builder import (
     CROSS_SECTION_SKIP_KEYS,
@@ -176,6 +177,7 @@ def _prepare_rows(db: Session, model: PredictionModel, feature_keys: list[str], 
         label_mode=model.label_mode,
         market_levels=levels,
         execution_mode=model.execution_mode,
+        delisted_codes=load_delisted_codes(db),
     )
     if not labeled:
         raise ValueError("這段期間沒有足夠的本地日K資料可以組出訓練樣本，請先回補更多歷史或調整日期區間")
