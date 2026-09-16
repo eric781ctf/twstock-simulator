@@ -1,17 +1,16 @@
-"""股票池的共用判斷：哪些代號算普通股、哪些股票已經下市。
+"""下市股票的共用查詢。
 
-回補、研究面板、訓練管線都要回答同樣的問題，放在一處才不會各寫一套、慢慢
-長得不一樣。
+「哪些代號算普通股」的定義只有一份，在 features/universe.py——這裡轉出來用。
+先前這個檔案自己寫了一份寬鬆的版本（沒有排除 91 開頭的 TDR），兩份定義遲早
+會分岔，而分岔的後果是母體在不同階段不一致，很難發現。
 """
 
 from sqlalchemy.orm import Session
 
 from app.models import LISTING_DELISTED, Stock
+from app.services.features.universe import is_ordinary_stock
 
-
-def is_ordinary_stock(code: str) -> bool:
-    """4 碼且不是 00 開頭。00 開頭是 ETF，5／6 碼是特別股、ETF、TDR 之類。"""
-    return len(code) == 4 and code.isdigit() and not code.startswith("00")
+__all__ = ["is_ordinary_stock", "load_delisted_codes"]
 
 
 def load_delisted_codes(db: Session) -> set[str]:

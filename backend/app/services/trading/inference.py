@@ -21,6 +21,7 @@ from app.services.ingest.industry_sync import load_industry_map
 from app.services.ingest.universe import load_delisted_codes
 from app.services.features.transforms import SCALING_RANK, industry_neutralize, rank_normalize
 from app.services.features.builder import CROSS_SECTION_SKIP_KEYS, WARMUP_BARS, build_feature_rows
+from app.services.features.universe import is_ordinary_stock
 from app.services.trading.selection import OpenPosition, run_daily_cycle
 from app.services.features.sequences import DEFAULT_SEQUENCE_LENGTH, index_feature_rows
 from app.services.modeling.train import SEQUENCE_MODEL_TYPES
@@ -71,6 +72,26 @@ def latest_bar_date(db: Session) -> date | None:
         .limit(1)
         .scalar()
     )
+
+
+def _held_codes_outside_universe(db: Session, models: list[PredictionModel]) -> set[str]:
+    """還開著、但代號不在普通股母體裡的正式持有。
+
+    母體收窄之前，模型挑過槓桿 ETF、ETN、TDR。那些部位要照各自的出場規則
+    走完，所以得繼續拿到它們的價格——否則 run_daily_cycle 會因為「今天沒有
+    K 棒」而永遠續抱，佔著名額不放。出場之後這個集合自然變空。
+    """
+    rows = (
+        db.query(ModelHolding.stock_code)
+        .filter(
+            ModelHolding.model_id.in_([m.id for m in models]),
+            ModelHolding.source == "live",
+            ModelHolding.status == "open",
+        )
+        .distinct()
+        .all()
+    )
+    return {code for (code,) in rows if not is_ordinary_stock(code)}
 
 
 def _score_one_model(
@@ -189,7 +210,10 @@ def run_daily_scoring(db: Session, today: date | None = None) -> int:
         feature_start = today - timedelta(days=int(max_sequence * TRADING_DAY_TO_CALENDAR) + 7)
 
     fetch_start = feature_start - timedelta(days=WARMUP_CALENDAR_DAYS)
-    rows, bars_by_code = build_feature_rows(db, fetch_start, today, feature_start)
+    legacy_codes = _held_codes_outside_universe(db, models)
+    if legacy_codes:
+        logger.info("run_daily_scoring: 母體外仍有未平倉持有，照常出場但不再進場：%s", sorted(legacy_codes))
+    rows, bars_by_code = build_feature_rows(db, fetch_start, today, feature_start, legacy_codes)
     rows_today = rows.on_date(today)
     if not rows_today:
         logger.warning("run_daily_scoring: %s 沒有可用的特徵列（可能不是交易日或資料未同步），略過", today)
@@ -201,6 +225,14 @@ def run_daily_scoring(db: Session, today: date | None = None) -> int:
         return 0
     signal_day = previous_days[-1]
     signal_rows = rows.on_date(signal_day)
+
+    # 兩道篩選都要：母體擋掉 ETF／ETN／TDR，下市名單擋掉已經不在的公司。
+    # 兩者不重疊——ETF 現在還在掛牌，下市的則多半是普通股
+    if legacy_codes:
+        # 候選只能來自母體；排名化也要在濾掉之後做，名次才跟訓練時的橫斷面一致
+        signal_rows = signal_rows.mask(
+            np.array([is_ordinary_stock(c) for c in signal_rows.stock_codes()], dtype=bool)
+        )
 
     # 下市股票照理不會有今天的日K，但股票池納入下市股票之後，這裡要明講：
     # 即時選股只挑現在還掛牌的，不靠「剛好沒有資料」這種巧合擋掉

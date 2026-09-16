@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from app.models import DailyBar, ModelHolding, ModelPrediction, PredictionModel
 from app.services.ingest.universe import load_delisted_codes
 from app.services.trading.exit_rules import net_return_percent
-from app.services.modeling.labels import EXECUTION_NEXT_OPEN
+from app.services.modeling.labels import EXECUTION_NEXT_OPEN, drop_price_jump_rows
 from app.services.trading.selection import ModelBundle, OpenPosition, predict_rows, run_daily_cycle
 
 logger = logging.getLogger(__name__)
@@ -211,6 +211,9 @@ def run_backtest(
     test_rows: list[dict],
     bars_by_code: dict[str, list[DailyBar]],
 ) -> dict:
-    prediction_stats = save_predictions(db, model, bundle, test_rows)
+    # 預測散佈圖比的是「預測 vs label」，label 算錯的列畫進去只會是幾個
+    # -96% 的點把整張圖壓扁；逐日模擬則必須用完整的測試列，理由見
+    # labels.drop_price_jump_rows
+    prediction_stats = save_predictions(db, model, bundle, drop_price_jump_rows(test_rows))
     trading_stats = simulate_trading(db, model, bundle, test_rows, bars_by_code)
     return {**prediction_stats, **trading_stats}
