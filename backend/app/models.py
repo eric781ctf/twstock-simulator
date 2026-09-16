@@ -27,6 +27,10 @@ class Market(str, enum.Enum):
     TPEX = "TPEX"
 
 
+LISTING_LISTED = "listed"
+LISTING_DELISTED = "delisted"
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -71,6 +75,16 @@ class Stock(Base):
     # TWSE 產業別代碼（24=半導體…）。只用來做產業中性化的分組；
     # ETF 與受益證券沒有產業別，維持 NULL
     industry: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # listed＝目前在官方清單上；delisted＝已經不在（下市、併購消滅、轉上櫃以外的
+    # 各種退場）。下市股票不能出現在即時選股，但訓練、回測、研究都要納入——
+    # 只用「今天還活著的股票」回推歷史，會把跌到下市的輸家整批藏起來
+    listing_status: Mapped[str] = mapped_column(
+        String(10), nullable=False, default=LISTING_LISTED, server_default=LISTING_LISTED
+    )
+    # 最後一次出現在官方上市／上櫃清單的日期，判斷「消失多久了」用
+    last_listed_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # 下市股票的最後一個交易日；上市中的股票是 NULL
+    delisted_on: Mapped[date | None] = mapped_column(Date, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
@@ -90,6 +104,25 @@ class DailyBar(Base):
     close: Mapped[float] = mapped_column(Float, nullable=False)
     # 全市場單日成交股數會超過 int4 上限（21 億），高人氣 ETF 一天就能撞到
     volume: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+
+
+class IngestDateLog(Base):
+    """「某個來源的某一天已經完整處理過」的紀錄。
+
+    既有的按日回補用「當天本地已有 200 筆以上」判斷補過沒，那只看得出「這天有
+    沒有人補過」，看不出「補的時候清單裡有沒有這一檔」——清單後來才加進來的
+    代號，那些日期就永遠補不到。逐日記下處理過的日期，重跑才能精準接續。
+    """
+
+    __tablename__ = "ingest_date_log"
+    __table_args__ = (UniqueConstraint("source", "trade_date", name="uq_ingest_date_log_source_date"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    source: Mapped[str] = mapped_column(String(40), nullable=False)
+    trade_date: Mapped[date] = mapped_column(Date, nullable=False)
+    # 當天官方回傳的列數；0 代表確認是非交易日
+    row_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class StockValuationHistory(Base):

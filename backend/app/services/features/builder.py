@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from app.models import ChipDaily, DailyBar, Market, ShareholdingWeekly, Stock, StockValuationHistory
 from app.services.features.indicators import compute_kd_series
 from app.services.ingest.industry_sync import INDUSTRY_NAMES, load_industry_map
+from app.services.ingest.universe import load_delisted_codes
 from app.services.features.frame import FeatureFrame
 from app.services.features.overseas import (
     MARKET_WIDE_KEYS as OVERSEAS_MARKET_WIDE_KEYS,
@@ -618,6 +619,7 @@ def build_feature_rows(
     combined = _attach_industry(combined, industry_map)
     combined = _attach_futures(combined, db, fetch_start, fetch_end, market_series)
     combined = attach_overseas(combined, overseas_series, industry_map)
+    _warn_delisted_coverage(combined, load_delisted_codes(db))
 
     rows = _to_feature_frame(combined)
 
@@ -631,6 +633,40 @@ def build_feature_rows(
         rows.values.nbytes / 2**20,
     )
     return rows, bars_by_code
+
+
+# 下市股票某類特徵的缺值率比上市股票高出這麼多（百分點），就視為洩漏風險
+DELISTED_COVERAGE_GAP = 20.0
+
+
+def _warn_delisted_coverage(combined: pd.DataFrame, delisted_codes: set[str]) -> None:
+    """下市股票的籌碼、估值、產業別如果系統性缺值，「缺值」本身就會洩漏未來。
+
+    日K可以從 MI_INDEX 補回下市股票，但籌碼與估值的回補要另外跑，產業別的
+    來源（t187ap03_L）根本只有現在上市的公司。只補了日K就拿去訓練的話，模型
+    看得到「這檔的籌碼欄是空的」，而那在歷史上幾乎等於「這檔將來會下市」——
+    一個上線時永遠不會出現的訊號。這裡不改資料，只大聲提醒。
+    """
+    if not delisted_codes or combined.empty:
+        return
+    is_delisted = combined["stock_code"].isin(delisted_codes)
+    if not is_delisted.any():
+        return
+
+    checks = [("籌碼", "foreign_net_ratio"), ("估值", "pb_ratio"), ("產業別", "industry_unknown")]
+    for label, column in checks:
+        if column not in combined:
+            continue
+        # industry_unknown 是 0/1 欄，1 就是「沒有產業別」；其他欄看 NaN
+        missing = combined[column] == 1 if column == "industry_unknown" else combined[column].isna()
+        delisted_rate = missing[is_delisted].mean() * 100
+        listed_rate = missing[~is_delisted].mean() * 100
+        if delisted_rate - listed_rate > DELISTED_COVERAGE_GAP:
+            logger.warning(
+                "build_feature_rows: 下市股票的%s缺值率 %.0f%%，上市股票 %.0f%%——"
+                "缺值本身會洩漏「將來會下市」，訓練前請先回補或不要用這類特徵",
+                label, delisted_rate, listed_rate,
+            )
 
 
 def _to_feature_frame(df: pd.DataFrame) -> FeatureFrame:

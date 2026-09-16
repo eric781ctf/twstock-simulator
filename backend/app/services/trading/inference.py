@@ -11,12 +11,14 @@ import logging
 import time
 from datetime import date, timedelta
 
+import numpy as np
 from sqlalchemy.orm import Session
 
 from app.models import DailyBar, Market, ModelHolding, ModelScoringRun, PredictionModel, Stock
 from app.services.modeling import artifacts
 from app.services.trading.exit_rules import net_return_percent
 from app.services.ingest.industry_sync import load_industry_map
+from app.services.ingest.universe import load_delisted_codes
 from app.services.features.transforms import SCALING_RANK, industry_neutralize, rank_normalize
 from app.services.features.builder import CROSS_SECTION_SKIP_KEYS, WARMUP_BARS, build_feature_rows
 from app.services.trading.selection import OpenPosition, run_daily_cycle
@@ -199,6 +201,13 @@ def run_daily_scoring(db: Session, today: date | None = None) -> int:
         return 0
     signal_day = previous_days[-1]
     signal_rows = rows.on_date(signal_day)
+
+    # 下市股票照理不會有今天的日K，但股票池納入下市股票之後，這裡要明講：
+    # 即時選股只挑現在還掛牌的，不靠「剛好沒有資料」這種巧合擋掉
+    delisted = load_delisted_codes(db)
+    if delisted:
+        rows_today = rows_today.mask(~np.isin(rows_today.stock_codes(), list(delisted)))
+        signal_rows = signal_rows.mask(~np.isin(signal_rows.stock_codes(), list(delisted)))
     logger.info("run_daily_scoring: %s 成交，進場訊號取自 %s", today, signal_day)
 
     done = 0

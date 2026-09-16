@@ -14,6 +14,7 @@ const EXIT_REASON_LABEL: Record<string, string> = {
   take_profit: "停利",
   max_hold_days: "持有到期",
   backtest_end: "回測結束平倉",
+  delisted: "下市結算",
 };
 
 function pct(value: number | null | undefined): string {

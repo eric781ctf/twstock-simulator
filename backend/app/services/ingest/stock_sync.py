@@ -6,7 +6,7 @@ import httpx
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.models import DailyBar, Market, Stock, StockValuationHistory
+from app.models import LISTING_DELISTED, LISTING_LISTED, DailyBar, Market, Stock, StockValuationHistory
 from app.services.ingest import backfill_status
 from app.services.ingest.history import RateLimitedError, backfill_twse_history, upsert_daily_bar
 from app.services.ingest.twse_client import (
@@ -28,6 +28,10 @@ DAILY_BAR_REQUEST_DELAY_SECONDS = 10.0  # 同一檔股票內，每個月份請�
 DAILY_BAR_STOCK_DELAY_SECONDS = 60.0  # 批次內，股票跟股票之間的間隔
 DAILY_BAR_MAX_PER_RUN = 100  # 每次排程/啟動最多處理幾檔，其餘留給下一次
 _HEADERS = {"User-Agent": "Mozilla/5.0 (twstock-simulator)"}
+# 連續這麼多個交易日不在官方清單上才標成下市
+DELIST_AFTER_TRADING_DAYS = 5
+# 清單回傳檔數低於本地上市中檔數的這個比例，視為端點異常
+LISTING_HEALTHY_RATIO = 0.9
 
 
 async def sync_stocks(db: Session) -> int:
@@ -46,19 +50,25 @@ async def sync_stocks(db: Session) -> int:
         return 0
 
     existing_stocks = {s.code: s for s in db.query(Stock).all()}
+    listing_date = max((item["trade_date"] for item in all_stocks if item.get("trade_date")), default=date.today())
     count = 0
     for item in all_stocks:
         code = item["code"]
         if code in existing_stocks:
-            existing_stocks[code].name = item["name"]
-            existing_stocks[code].market = Market(item["market"])
+            stock = existing_stocks[code]
+            stock.name = item["name"]
+            stock.market = Market(item["market"])
         else:
             stock = Stock(code=code, name=item["name"], market=Market(item["market"]))
             db.add(stock)
             existing_stocks[code] = stock
+        stock.listing_status = LISTING_LISTED
+        stock.delisted_on = None
+        stock.last_listed_on = listing_date
         count += 1
 
     db.flush()
+    _mark_missing_as_delisted(db, existing_stocks, listed, otc, listing_date)
 
     bar_items = [item for item in all_stocks if item.get("trade_date")]
     bar_codes = [item["code"] for item in bar_items]
@@ -92,6 +102,69 @@ async def sync_stocks(db: Session) -> int:
     db.commit()
     logger.info("sync_stocks: 同步完成，共 %d 檔", count)
     return count
+
+
+def _mark_missing_as_delisted(
+    db: Session,
+    stocks_by_code: dict[str, Stock],
+    listed: list[dict],
+    otc: list[dict],
+    listing_date: date,
+) -> int:
+    """把「連續好幾個交易日都不在官方清單上」的股票標成下市。回傳本次新標記的檔數。
+
+    只消失一天不算：停牌、清單端點偶爾少回幾檔都會造成單日缺席，等滿
+    DELIST_AFTER_TRADING_DAYS 個交易日才認定。某個市場這次回傳的檔數明顯比
+    本地「上市中」的少，代表是端點出狀況而不是一大批公司同時下市，整個市場
+    跳過不判斷。
+    """
+    returned = {Market.TWSE: {i["code"] for i in listed}, Market.TPEX: {i["code"] for i in otc}}
+    # 上櫃清單每天都有到期的權證消失，同一個日期的交易日數算一次就好
+    days_since: dict[date, int] = {}
+    marked = 0
+    for market, codes in returned.items():
+        active = [s for s in stocks_by_code.values() if s.market == market and s.listing_status == LISTING_LISTED]
+        if not codes or len(codes) < len(active) * LISTING_HEALTHY_RATIO:
+            logger.warning(
+                "sync_stocks: %s 清單只回 %d 檔（本地上市中 %d 檔），疑似端點異常，這次不判斷下市",
+                market.value, len(codes), len(active),
+            )
+            continue
+        missing = [s for s in active if s.code not in codes]
+        if not missing:
+            continue
+
+        missing_codes = [s.code for s in missing]
+        last_bar = dict(
+            db.query(DailyBar.stock_code, func.max(DailyBar.trade_date))
+            .filter(DailyBar.stock_code.in_(missing_codes))
+            .group_by(DailyBar.stock_code)
+            .all()
+        )
+        for stock in missing:
+            if stock.last_listed_on is None:
+                # 欄位是後來才加的，舊資料沒有值：用最後一根日K當作最後在清單上的日子
+                stock.last_listed_on = last_bar.get(stock.code) or listing_date
+            if stock.last_listed_on not in days_since:
+                days_since[stock.last_listed_on] = _trading_days_between(db, stock.last_listed_on, listing_date)
+            if days_since[stock.last_listed_on] < DELIST_AFTER_TRADING_DAYS:
+                continue
+            stock.listing_status = LISTING_DELISTED
+            stock.delisted_on = last_bar.get(stock.code) or stock.last_listed_on
+            marked += 1
+            logger.info("sync_stocks: %s %s 已連續多日不在清單上，標記為下市（最後交易日 %s）",
+                        stock.code, stock.name, stock.delisted_on)
+    return marked
+
+
+def _trading_days_between(db: Session, after: date, until: date) -> int:
+    """(after, until] 之間本地日K出現過幾個交易日。"""
+    return (
+        db.query(func.count(func.distinct(DailyBar.trade_date)))
+        .filter(DailyBar.trade_date > after, DailyBar.trade_date <= until)
+        .scalar()
+        or 0
+    )
 
 
 def _upsert_valuation_snapshot(db: Session, as_of: date, items: list[dict], known_codes: set[str]) -> int:
@@ -366,7 +439,13 @@ async def backfill_all_twse_daily_bars(
     cutoff = date.today() - timedelta(days=months * 31 + 10)
     backfill_status.begin(0)
 
-    twse_codes = [c for (c,) in db.query(Stock.code).filter(Stock.market == Market.TWSE).all()]
+    # 下市股票最近本來就沒有日K，不排除的話每一輪都會被當成「資料不足」重打
+    twse_codes = [
+        c
+        for (c,) in db.query(Stock.code)
+        .filter(Stock.market == Market.TWSE, Stock.listing_status == LISTING_LISTED)
+        .all()
+    ]
     if not twse_codes:
         backfill_status.finish(backfill_status.PHASE_COMPLETED, "本地還沒有上市股票清單")
         return 0
@@ -477,7 +556,7 @@ def get_daily_bar_stats(db: Session) -> dict:
     區間、有幾檔已經達到「足夠」（>= DAILY_BAR_MIN_BARS）的門檻。TWSE 的
     「足夠」通常代表已經被 backfill_all_twse_daily_bars 回補過；TPEx 沒有
     回補機制，純粹是逐日累積的結果，前端呈現時措辭要分開講。"""
-    stock_markets = dict(db.query(Stock.code, Stock.market).all())
+    stock_markets = dict(db.query(Stock.code, Stock.market).filter(Stock.listing_status == LISTING_LISTED).all())
     bar_counts = dict(db.query(DailyBar.stock_code, func.count(DailyBar.id)).group_by(DailyBar.stock_code).all())
 
     result = {}

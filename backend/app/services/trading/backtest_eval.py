@@ -16,6 +16,7 @@ import numpy as np
 from sqlalchemy.orm import Session
 
 from app.models import DailyBar, ModelHolding, ModelPrediction, PredictionModel
+from app.services.ingest.universe import load_delisted_codes
 from app.services.trading.exit_rules import net_return_percent
 from app.services.modeling.labels import EXECUTION_NEXT_OPEN
 from app.services.trading.selection import ModelBundle, OpenPosition, predict_rows, run_daily_cycle
@@ -23,6 +24,7 @@ from app.services.trading.selection import ModelBundle, OpenPosition, predict_ro
 logger = logging.getLogger(__name__)
 
 EXIT_BACKTEST_END = "backtest_end"
+EXIT_DELISTED = "delisted"
 
 
 def save_predictions(db: Session, model: PredictionModel, bundle: ModelBundle, test_rows: list[dict]) -> dict:
@@ -85,7 +87,30 @@ def simulate_trading(
     open_positions: list[OpenPosition] = []
     closed: list[dict] = []
 
+    delisted_codes = load_delisted_codes(db)
+
     for i, today in enumerate(trading_days):
+        # 持有中的股票已經下市（最後一根 K 棒在今天之前）：它不會再出現在任何
+        # 一天的特徵列裡，出場規則永遠輪不到它。在最後交易日用最後收盤價出場，
+        # 不然會一路掛到回測結束，再被當成「沒有價格」用進場價平倉，記成 0%
+        still_open = []
+        for position in open_positions:
+            bars = bars_by_code.get(position.stock_code)
+            if position.stock_code in delisted_codes and bars and bars[-1].trade_date < today:
+                closed.append(
+                    {
+                        "stock_code": position.stock_code,
+                        "entry_date": position.entry_date,
+                        "entry_price": position.entry_price,
+                        "exit_date": bars[-1].trade_date,
+                        "exit_price": float(bars[-1].close),
+                        "reason": EXIT_DELISTED,
+                    }
+                )
+            else:
+                still_open.append(position)
+        open_positions = still_open
+
         rows_today = rows_by_date[today]
         # 進場訊號取前一個交易日。第一天沒有前一天，所以只做出場判斷
         signal_rows = rows_by_date[trading_days[i - 1]] if i > 0 else []
@@ -126,7 +151,12 @@ def simulate_trading(
         if price == price
     }
     for position in open_positions:
-        exit_price = last_prices.get(position.stock_code, position.entry_price)
+        exit_price = last_prices.get(position.stock_code)
+        if exit_price is None:
+            # 最後一天沒有特徵列（停牌之類）：用到那天為止最後一個收盤價，
+            # 找不到才退回進場價
+            bars = [b for b in bars_by_code.get(position.stock_code, []) if b.trade_date <= last_day]
+            exit_price = float(bars[-1].close) if bars else position.entry_price
         closed.append(
             {
                 "stock_code": position.stock_code,
