@@ -14,8 +14,10 @@ backend/model_artifacts/
 
 # 臨時驗證腳本。docker compose cp 會寫進掛載的 ./backend，容器內刪掉不一定成功
 # （Git Bash 會把 /app/... 轉成 Windows 路徑，rm 就靜默失敗），所以這裡設一道防線。
-backend/*_tmp.py
-backend/probe*.py
+# backend/ 的 /app 是容器的綁定掛載，臨時丟進容器執行的腳本都會落在這一層。
+# backend/ 底下合法的東西只有 app/、Dockerfile、requirements.txt 與資料目錄，
+# 所以整層的 .py 一律不追蹤——之前只擋 probe*/​*_tmp 兩種命名，換個檔名就漏了
+backend/*.py
 
 # 集保股權分散表的原始 CSV（約 50MB，且可從 TDCC 重新下載）
 backend/tdcc_data/

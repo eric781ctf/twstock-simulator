@@ -262,7 +262,18 @@ async def backfill_valuation_history(
 
 
 DAILY_BY_DATE_DELAY_SECONDS = 5.0  # 逐日回補的請求間隔；一天一次請求，這個節奏遠低於限流門檻
-DAILY_BY_DATE_MIN_ROWS = 200  # 某一天本地已有這麼多筆上市日K，就當作那天補過了
+DAILY_BY_DATE_MIN_ROWS = 200  # 低於這個筆數的日期一定不完整，直接列入待補
+# 一天的筆數要有「鄰近日期最高筆數」的這個比例，才算補齊。只看絕對筆數不夠
+# ——實測 2026-07-01 ~ 08-27 有 41 天各存了約 1150 筆（正常約 1345 筆），少掉的
+# 是代號排序尾端的 188 檔普通股，看起來像是來源回應被截斷。那些日子遠高於
+# 200 筆，所以每次重跑都被當成「補過了」而跳過，缺口就永遠留在那裡。
+#
+# 比較對象是「鄰近日期的最高筆數」而不是整段的中位數或最大值：
+#   中位數  ——連續壞掉四十幾天的話，中位數會被那些壞掉的日子自己拉低
+#   全段最大——上市檔數這幾年從約 950 成長到約 1350，用整段最大值當基準，
+#             2020 年的日期會全部被誤判成缺資料而重抓
+DAILY_BY_DATE_COMPLETE_RATIO = 0.95
+DAILY_BY_DATE_REFERENCE_WINDOW = 30  # 往前後各看幾個日曆天找基準
 # 連續這麼多個平日回傳空資料就中止：台股最長的連假也不到兩週
 EMPTY_WEEKDAY_ABORT = 10
 
@@ -290,9 +301,13 @@ async def backfill_twse_daily_bars_by_date(
         return 0
 
     # 先問清楚哪些日期已經補過，避免重跑時重複打同樣的請求
+    # 只算上市（TWSE）的筆數。這個函式也只寫上市的股票，混進上櫃會讓「這天
+    # 補齊了沒」失去意義——上櫃是後來才加的，近期日期會多出好幾千筆，中位數
+    # 被拉高之後，真正缺資料的日子反而看起來正常
     existing_counts = dict(
         db.query(DailyBar.trade_date, func.count(DailyBar.id))
-        .filter(DailyBar.trade_date >= start, DailyBar.trade_date <= end)
+        .join(Stock, Stock.code == DailyBar.stock_code)
+        .filter(Stock.market == Market.TWSE, DailyBar.trade_date >= start, DailyBar.trade_date <= end)
         .group_by(DailyBar.trade_date)
         .all()
     )
@@ -300,7 +315,26 @@ async def backfill_twse_daily_bars_by_date(
     all_days = [start + timedelta(days=i) for i in range((end - start).days + 1)]
     # 週末直接排除，不用浪費請求去問 TWSE
     candidate_days = [d for d in all_days if d.weekday() < 5]
-    pending_days = [d for d in candidate_days if existing_counts.get(d, 0) < DAILY_BY_DATE_MIN_ROWS]
+
+    traded = {d: n for d, n in existing_counts.items() if n >= DAILY_BY_DATE_MIN_ROWS}
+
+    def complete_rows_for(day: date) -> int:
+        """這一天要有幾筆才算補齊：鄰近日期最高筆數的 95%。"""
+        window = timedelta(days=DAILY_BY_DATE_REFERENCE_WINDOW)
+        nearby = [n for d, n in traded.items() if abs(d - day) <= window]
+        if not nearby:
+            return DAILY_BY_DATE_MIN_ROWS
+        return max(DAILY_BY_DATE_MIN_ROWS, int(max(nearby) * DAILY_BY_DATE_COMPLETE_RATIO))
+
+    pending_days = [d for d in candidate_days if existing_counts.get(d, 0) < complete_rows_for(d)]
+    incomplete = [d for d in pending_days if existing_counts.get(d, 0) >= DAILY_BY_DATE_MIN_ROWS]
+    if incomplete:
+        logger.warning(
+            "backfill_twse_daily_bars_by_date: %d 個日期筆數明顯偏少，會重抓（例：%s 只有 %d 筆、"
+            "鄰近日期應有 %d 筆）",
+            len(incomplete), incomplete[0], existing_counts.get(incomplete[0], 0),
+            complete_rows_for(incomplete[0]),
+        )
 
     backfill_status.begin(len(pending_days))
     if not pending_days:
