@@ -13,6 +13,7 @@ import pandas as pd
 
 from app.models import DailyBar
 from app.services.features.frame import FeatureFrame
+from app.services.features.universe import PRICE_JUMP_PERCENT, is_price_jump
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,9 @@ def attach_labels(
     等於要重建基準。
 
     沒有 label 的列（資料尾端不足 n 根）直接排除，回傳新的 FeatureFrame。
+
+    另外會多一欄 PRICE_JUMP_COLUMN：label 視窗裡有沒有超出漲跌幅限制的跳動。
+    這裡只標記、不丟——要不要丟看用途，見 drop_price_jump_rows。
     """
     n = len(rows)
     if n == 0:
@@ -88,11 +92,17 @@ def attach_labels(
     closes_by_code: dict[str, list[float]] = {}
     opens_by_code: dict[str, list[float]] = {}
     dates_by_code: dict[str, list[date]] = {}
+    # jumps_by_code[code][k]：第 0..k 根 K 棒裡有幾根是跳動。視窗內有沒有跳動
+    # 就是兩個累計值相減，不用每一列重掃一次視窗
+    jumps_by_code: dict[str, np.ndarray] = {}
     for code, bars in bars_by_code.items():
         index_by_code[code] = {b.trade_date: i for i, b in enumerate(bars)}
         closes_by_code[code] = [b.close for b in bars]
         opens_by_code[code] = [b.open for b in bars]
         dates_by_code[code] = [b.trade_date for b in bars]
+        jumps_by_code[code] = np.cumsum(
+            [False] + [is_price_jump(bars[k - 1].close, bars[k].close) for k in range(1, len(bars))]
+        )
 
     # 兩種模式差在「從哪一根 K 棒的哪個價格進、哪一根的哪個價格出」。
     # close：  進 = 收盤(j)、出 = 收盤(j+n)
@@ -101,6 +111,7 @@ def attach_labels(
     prices = opens_by_code if execution_mode == EXECUTION_NEXT_OPEN else closes_by_code
 
     future_return = np.full(n, np.nan, dtype=np.float64)
+    jump_in_window = np.zeros(n, dtype=np.float64)
     codes = rows.stock_codes()
 
     for i in range(n):
@@ -134,21 +145,58 @@ def attach_labels(
                 continue
             value -= market
         future_return[i] = value
+        # 看第 j+1 到 exit_index 根的收盤跳動。close 模式剛好是整個視窗；
+        # next_open 模式多看了第 j+1 根收盤相對第 j 根的變動，那一段有一部分
+        # （收盤 j → 開盤 j+1 的跳空）不在 label 裡——寧可多丟幾筆，也不要漏掉
+        # 「開盤 j+1 當天就已經是新價格基準」的情況
+        jumps = jumps_by_code[code]
+        jump_in_window[i] = float(jumps[exit_index] - jumps[j] > 0)
 
     keep = ~np.isnan(future_return)
     labeled = rows.mask(keep)
     kept_returns = future_return[keep]
     labeled.set_column("future_return_percent", kept_returns)
     labeled.set_column("label", (kept_returns > threshold_percent).astype(np.float64))
+    labeled.set_column(PRICE_JUMP_COLUMN, jump_in_window[keep])
 
     logger.info(
-        "attach_labels(%s/%s): %d 列有完整 label（原始 %d 列）",
+        "attach_labels(%s/%s): %d 列有完整 label（原始 %d 列），其中 %d 列的視窗含 ±%.1f%% 以上跳動",
         label_mode,
         execution_mode,
         len(labeled),
         n,
+        int(jump_in_window[keep].sum()),
+        PRICE_JUMP_PERCENT,
     )
     return labeled
+
+
+PRICE_JUMP_COLUMN = "price_jump_in_window"
+
+
+def drop_price_jump_rows(rows: FeatureFrame) -> FeatureFrame:
+    """丟掉 label 視窗內有跳動的樣本。用在「拿 label 當答案」的地方：訓練、
+    驗證、測試評分、預測散佈圖。
+
+    **為什麼丟而不是截尾（clip / winsorize）。** 這些 label 不是「很極端但真實
+    的報酬」，而是算錯的數字：日K沒有還原，減資或反分割那天價格基準直接換掉，
+    00685L 反分割一天 -96%，實際持有人的報酬是 0。截到 -20% 仍然在告訴模型
+    「這是一筆大虧」，方向與大小都是假的，只是錯得比較不顯眼；截尾適用於
+    「值是對的、只是太大」的情況，這裡不是。丟掉的量也很小——普通股母體裡
+    約 0.2% 的樣本。
+
+    **為什麼回測選股時不丟。** 「接下來 n 天會不會除權、減資」在決策當下是
+    不知道的；用它去排除候選股，等於讓回測用未來資訊避開了踩雷的那幾檔。
+    所以逐日模擬（simulate_trading）拿的是沒丟過的測試列。
+
+    **為什麼不在 attach_labels 裡直接丟。** 排名化是同一天全市場的橫斷面
+    運算，先丟再排名的話，某檔股票因為「未來會減資」而從當天的名次裡消失，
+    其他股票的分位數就跟著變——那也是未來資訊，而且推論時的名次是用完整
+    的當日母體算的，兩邊會對不上。所以一律在橫斷面轉換做完、切分之後才丟。
+    """
+    if len(rows) == 0 or PRICE_JUMP_COLUMN not in rows.extras:
+        return rows
+    return rows.mask(rows.column(PRICE_JUMP_COLUMN) == 0)
 
 
 def _market_return_between(

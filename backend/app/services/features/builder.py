@@ -1,7 +1,8 @@
 """特徵工程：把本地的日K與估值快照組成「每檔股票、每個交易日一列」的特徵表。
 
-只做 TWSE 上市股票。所有特徵都嚴格只用「該交易日收盤後就已經知道」的資料——
-技術指標算到當天為止（不含未來），估值快照只取「日期 <= 當天」的最新一筆。
+只做 TWSE 上市的普通股（母體定義見 universe.py）。所有特徵都嚴格只用「該交易日
+收盤後就已經知道」的資料——技術指標算到當天為止（不含未來），估值快照只取
+「日期 <= 當天」的最新一筆。
 這是避免 look-ahead bias 最關鍵的一環：只要有一個特徵偷看到未來，整個回測
 結果就會好看到不真實，但實際上線完全不能用。
 
@@ -11,6 +12,7 @@
 
 import logging
 from collections import defaultdict
+from collections.abc import Iterable
 from datetime import date, timedelta
 
 import numpy as np
@@ -21,6 +23,7 @@ from app.models import ChipDaily, DailyBar, Market, ShareholdingWeekly, Stock, S
 from app.services.features.indicators import compute_kd_series
 from app.services.ingest.industry_sync import INDUSTRY_NAMES, load_industry_map
 from app.services.features.frame import FeatureFrame
+from app.services.features.universe import ORDINARY_STOCK_CODE_PATTERN, is_ordinary_stock, is_price_jump
 from app.services.features.overseas import (
     MARKET_WIDE_KEYS as OVERSEAS_MARKET_WIDE_KEYS,
     OVERSEAS_FEATURE_KEYS,
@@ -195,7 +198,7 @@ for _window in WINDOWS:
 FEATURE_LABELS.update(
     {f"industry_{code}": f"產業別：{name}" for code, name in INDUSTRY_NAMES.items()}
 )
-FEATURE_LABELS["industry_unknown"] = "產業別：未分類（ETF、受益證券）"
+FEATURE_LABELS["industry_unknown"] = "產業別：未分類（產業別尚未同步）"
 FEATURE_LABELS.update(FUTURES_FEATURE_LABELS)
 FEATURE_LABELS.update(OVERSEAS_FEATURE_LABELS)
 
@@ -349,12 +352,29 @@ WARMUP_BARS = 60
 MIN_BARS_FOR_FEATURES = 25  # 低於這個長度連 MA20/KD 都不穩，整檔跳過
 
 
-def load_twse_bars(db: Session, start: date, end: date) -> dict[str, list[DailyBar]]:
-    """撈出 TWSE 上市股票在 [start, end] 之間的日K，依股票代碼分組、日期升冪。"""
+def load_twse_bars(
+    db: Session, start: date, end: date, extra_codes: Iterable[str] = ()
+) -> dict[str, list[DailyBar]]:
+    """撈出 TWSE 上市普通股在 [start, end] 之間的日K，依股票代碼分組、日期升冪。
+
+    extra_codes 是母體之外、但仍然需要價格的代號——實際上只有一種：母體收窄
+    之前就已經開倉、還沒出場的正式持有。它們要照原本的出場規則走完，所以得有
+    K 棒；但不會進合成大盤（build_market_series 自己會濾），也不會成為候選
+    （inference 產生訊號列時會濾）。
+    """
+    in_universe = DailyBar.stock_code.regexp_match(ORDINARY_STOCK_CODE_PATTERN)
+    extra_codes = sorted(set(extra_codes))
+    if extra_codes:
+        in_universe = in_universe | DailyBar.stock_code.in_(extra_codes)
     rows = (
         db.query(DailyBar)
         .join(Stock, Stock.code == DailyBar.stock_code)
-        .filter(Stock.market == Market.TWSE, DailyBar.trade_date >= start, DailyBar.trade_date <= end)
+        .filter(
+            Stock.market == Market.TWSE,
+            in_universe,
+            DailyBar.trade_date >= start,
+            DailyBar.trade_date <= end,
+        )
         .order_by(DailyBar.stock_code.asc(), DailyBar.trade_date.asc())
         .all()
     )
@@ -362,11 +382,6 @@ def load_twse_bars(db: Session, start: date, end: date) -> dict[str, list[DailyB
     for row in rows:
         bars_by_code[row.stock_code].append(row)
     return dict(bars_by_code)
-
-
-
-
-
 
 
 def build_market_series(bars_by_code: dict[str, list[DailyBar]]) -> dict[date, dict]:
@@ -380,12 +395,20 @@ def build_market_series(bars_by_code: dict[str, list[DailyBar]]) -> dict[date, d
     權值股主導，而這個系統是全市場等權選股，等權的大盤才是它真正的比較基準。
 
     每個日期只用「當天及之前」的資料，跟其他特徵一樣不看未來。
+
+    只算普通股，而且跳過超出漲跌幅限制的那一根：那不是當天的行情，是價格
+    基準換了（減資、除權、缺資料後接上）。一檔倫飛 +612% 在一千檔裡平均
+    下來就是 +0.6 個百分點，足以讓合成大盤那天憑空大漲。在這裡濾而不是在
+    呼叫端濾，是因為 runner 也會直接拿 bars_by_code 呼叫這個函式算 label 的
+    大盤報酬——兩個呼叫點必須是同一個母體。
     """
     daily_returns: dict[date, list[float]] = defaultdict(list)
-    for bars in bars_by_code.values():
+    for code, bars in bars_by_code.items():
+        if not is_ordinary_stock(code):
+            continue
         for i in range(1, len(bars)):
             previous_close = bars[i - 1].close
-            if previous_close:
+            if previous_close and not is_price_jump(previous_close, bars[i].close):
                 daily_returns[bars[i].trade_date].append((bars[i].close - previous_close) / previous_close * 100)
 
     series: dict[date, dict] = {}
@@ -559,8 +582,12 @@ def build_feature_rows(
     fetch_start: date,
     fetch_end: date,
     feature_start: date,
+    extra_codes: Iterable[str] = (),
 ) -> tuple[list[dict], dict[str, list[DailyBar]]]:
-    """組出 [feature_start, fetch_end] 之間所有 TWSE 股票的特徵列。
+    """組出 [feature_start, fetch_end] 之間所有 TWSE 普通股的特徵列。
+
+    extra_codes 見 load_twse_bars：母體外、但還有未平倉持有的代號。它們一樣會
+    產出特徵列（出場要用當天的價格與漲跌停狀態），挑候選時由呼叫端排除。
 
     fetch_start 要比 feature_start 早一段（暖身期），指標才算得出來；早於
     feature_start 的日子只用來暖身，不會產出特徵列。
@@ -576,7 +603,7 @@ def build_feature_rows(
     還沒有 label——label 需要「未來」的價格，交給 dataset.attach_labels 用同一份
     日K去算，職責才不會跟「只能看過去」的特徵混在一起。
     """
-    bars_by_code = load_twse_bars(db, fetch_start, fetch_end)
+    bars_by_code = load_twse_bars(db, fetch_start, fetch_end, extra_codes)
     # 資料太短的股票連 MA20/KD 都不穩，整檔排除
     bars_by_code = {c: b for c, b in bars_by_code.items() if len(b) >= MIN_BARS_FOR_FEATURES}
     if not bars_by_code:

@@ -27,6 +27,7 @@ from app.services.modeling.labels import (
     EXECUTION_MODES,
     EXECUTION_NEXT_OPEN,
     attach_labels,
+    drop_price_jump_rows,
     purge_tail,
     split_by_date,
     to_matrix,
@@ -273,10 +274,23 @@ def _fit_and_evaluate(
     完全一樣，所以抽出來共用，兩邊才不會慢慢長出不一致的行為。
 
     回傳 (迴歸模型, 分類模型, metrics, 標準化參數, 測試列)。
+
+    label 視窗內有跳動的樣本在這裡丟（理由見 labels.drop_price_jump_rows）。
+    回傳的測試列是**沒丟過**的那一份——回測逐日選股要用決策當下看得到的
+    完整母體，不能先知道誰接下來會減資。
     """
-    x_train_raw, y_train_reg, y_train_clf = _build_matrices(train_rows, feature_keys, sequence_length)
+    scored_train = drop_price_jump_rows(train_rows)
+    scored_validation = drop_price_jump_rows(validation_rows)
+    scored_test = drop_price_jump_rows(test_rows)
+    logger.info(
+        "丟掉 label 視窗含跳動的樣本：訓練 %d、驗證 %d、測試 %d 列",
+        len(train_rows) - len(scored_train),
+        len(validation_rows) - len(scored_validation),
+        len(test_rows) - len(scored_test),
+    )
+    x_train_raw, y_train_reg, y_train_clf = _build_matrices(scored_train, feature_keys, sequence_length)
     x_validation_raw, y_validation_reg, y_validation_clf = _build_matrices(
-        validation_rows, feature_keys, sequence_length
+        scored_validation, feature_keys, sequence_length
     )
 
     # 標準化參數只用這一折的訓練集算。折與折之間不共用——共用等於讓後面的
@@ -303,7 +317,7 @@ def _fit_and_evaluate(
 
     from app.services.modeling.train import evaluate
 
-    x_test_raw, y_test_reg, y_test_clf = _build_matrices(test_rows, feature_keys, sequence_length)
+    x_test_raw, y_test_reg, y_test_clf = _build_matrices(scored_test, feature_keys, sequence_length)
     x_test = apply_scaler(x_test_raw, scaler_mean, scaler_std)
     metrics["test"] = evaluate(regressor, classifier, x_test, y_test_reg, y_test_clf)
 
@@ -506,7 +520,7 @@ def _rank_ic_for_group(outcome, labeled, groups, g, feature_keys, sequence_lengt
     """單獨一組的 Rank IC。路徑是由「不同組合測同一組」的結果拼起來的，
     所以要的是逐組分數，而不是整個測試集（k 組合在一起）的分數。"""
     regressor, classifier, _, (mean, std), _ = outcome
-    rows = labeled.mask(cpcv_mod.group_mask(labeled.dates, groups, g))
+    rows = drop_price_jump_rows(labeled.mask(cpcv_mod.group_mask(labeled.dates, groups, g)))
     if sequence_length:
         from app.services.features.sequences import filter_rows_with_history
 

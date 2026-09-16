@@ -37,6 +37,10 @@ The neural path deliberately **fails loudly** when GPU is configured but unavail
 
 **112 features** at present, all strictly limited to information known once that trading day has closed. Avoiding look-ahead is the single most important thing here: one feature that peeks into the future makes the backtest look wonderful and the live system worthless.
 
+**The universe is TWSE-listed common stock only**: 4-digit codes, not starting with 00 (ETFs) or 91 (TDRs); 5/6-character preferred shares, ETFs and ETNs are excluded. Features, the synthetic market index, labels, backtest selection and daily inference all share one definition (`features/universe.py`). Previously leveraged ETFs could be picked into the top 10, and a -96% reverse-split day became a training label.
+
+**Daily bars are not adjusted for corporate actions**, so any sample whose label window contains a close-to-close move beyond ±10.5% (outside the daily price limit, so it can only be a capital reduction, ex-rights/dividend, par-value change or missing data) is **dropped, not clipped**, from training, validation and test scoring — the number is not an extreme return, it is a wrong one. Backtest selection keeps those rows, because an upcoming capital reduction is unknown at decision time.
+
 | Source | Contents |
 |---|---|
 | Price / volume | Candle geometry, 4 windows (5/10/20/60) × 7 rolling operators, MA deviation, volume ratio, streaks. Modelled on Qlib's Alpha158 |
@@ -45,7 +49,7 @@ The neural path deliberately **fails loudly** when GPU is configured but unavail
 | Market | Index return (1/5/20 day), market breadth, index MA deviation, plus each stock's strength relative to the market |
 | Institutional flows | Foreign / trust / total institutional net buying, margin balance change, foreign holding ratio and its 20-day change (TWSE T86 / MI_MARGN / MI_QFIIS) |
 | Shareholder distribution | Large / mid / retail holder share and 4-week changes (TDCC, **weekly**) |
-| Industry | Industry one-hot columns (TWSE listed-company profile). 1093 of 1382 securities are classified; the rest are ETFs and beneficiary certificates |
+| Industry | Industry one-hot columns (TWSE listed-company profile). Every common stock in the universe is classified; the "unclassified" column only catches new listings whose industry has not been synced yet |
 
 The weekly shareholder data is joined with `allow_exact_matches=False` so the match is **strictly before** the feature date — Friday's snapshot is published on Saturday, and `<=` would let Friday's features see numbers that had not been released yet.
 
@@ -53,7 +57,7 @@ Four presets: **Curated** (19, hand-picked with low mutual overlap) / **Curated 
 
 ### Cross-sectional handling
 
-Stock picking asks "which of today's ~1300 names are relatively strong", so the goal is not precision but comparability within a day. All three options are same-day cross-sectional operations and never look ahead:
+Stock picking asks "which of today's ~1,000 common stocks are relatively strong", so the goal is not precision but comparability within a day. All three options are same-day cross-sectional operations and never look ahead:
 
 - **Cross-sectional rank**: replaces each feature with its percentile across that day's market. Better than z-score because it never compares last year's values against this year's.
 - **Excess-return label**: subtracts the market return over the same window, asking "will it beat the market" rather than "will it go up".
